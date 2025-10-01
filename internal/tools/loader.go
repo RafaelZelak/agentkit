@@ -19,6 +19,10 @@ type ToolConfig struct {
 	Column         string `yaml:"column,omitempty"`
 	EmbeddingModel string `yaml:"embedding_model,omitempty"`
 	TopK           int    `yaml:"top_k,omitempty"`
+
+	// Para scripts
+	Path     string `yaml:"path,omitempty"`
+	Function string `yaml:"function,omitempty"`
 }
 
 type Config struct {
@@ -27,7 +31,6 @@ type Config struct {
 
 var loaded Config
 
-// LoadTools lê o arquivo YAML e substitui conexões do tipo ENV:MY_ENV_KEY pelo valor da env var
 func LoadTools(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -49,8 +52,6 @@ func LoadTools(path string) error {
 	return nil
 }
 
-// GetTool retorna o ponteiro para o ToolConfig correto
-// Corrigido para iterar por índice, evitando retornar o endereço da cópia do range
 func GetTool(name string) *ToolConfig {
 	for i := range loaded.Tools {
 		if loaded.Tools[i].Name == name {

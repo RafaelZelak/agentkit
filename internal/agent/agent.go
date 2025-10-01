@@ -78,15 +78,30 @@ func buildMemBlock(recent, similar []memory.HistoryItem, boleto map[string]strin
 	return sb.String()
 }
 
-/*
-Run:
-- Injeta o contexto fixo (arquivo) como system.
-- Recupera memória HÍBRIDA (recentes + semântica) e fatos estruturados (boletos).
-- Chama Responses API.
-- Se resposta vier como TOOL: executa a tool e roda de novo.
-- Se verbose==true, retorna JSON detalhado.
-- Salva memória e metadata.
-*/
+func extractToolCommand(s string) (string, bool) {
+	if s == "" {
+		return "", false
+	}
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "`")
+	s = strings.Trim(s, "\"")
+
+	if strings.HasPrefix(s, "TOOL:") {
+		return s, true
+	}
+
+	// caso comum: bloco markdown com linhas
+	for _, ln := range strings.Split(s, "\n") {
+		t := strings.TrimSpace(ln)
+		t = strings.Trim(t, "`")
+		t = strings.Trim(t, "\"")
+		if strings.HasPrefix(t, "TOOL:") {
+			return t, true
+		}
+	}
+	return "", false
+}
+
 func Run(
 	ctx context.Context,
 	cli *openai.Client,
@@ -112,7 +127,6 @@ func Run(
 
 	mem := memory.Get()
 
-	// Parâmetros de memória via ENV
 	semTopK := envInt("MEM_SEM_TOPK", 5)
 	memDepth := envInt("MEM_DEPTH", 4)
 
@@ -139,7 +153,6 @@ func Run(
 		return nil
 	})
 	eg.Go(func() error {
-		// fatos de boleto
 		m, err := mem.LoadBoletoStatus(egctx, sessionID)
 		if err == nil {
 			faturas = m
@@ -149,7 +162,6 @@ func Run(
 
 	_ = eg.Wait()
 
-	// Agora que temos userEmb, buscar similar
 	if len(userEmb) > 0 {
 		if items, err := mem.RetrieveSimilar(ctx, sessionID, userEmb, semTopK); err == nil {
 			similar = items
@@ -174,9 +186,14 @@ func Run(
 		return "", err
 	}
 
-	rv := runVerbose{FinalText: resp.OutputText}
-	if strings.HasPrefix(strings.TrimSpace(resp.OutputText), "TOOL:") {
-		parts := strings.Fields(resp.OutputText)
+	originalOut := strings.TrimSpace(resp.OutputText)
+
+	toolLine, hasTool := extractToolCommand(originalOut)
+
+	rv := runVerbose{FinalText: originalOut}
+
+	if hasTool {
+		parts := strings.Fields(toolLine)
 		if len(parts) >= 1 {
 			toolName := strings.TrimPrefix(parts[0], "TOOL:")
 			args := parts[1:]
@@ -203,6 +220,9 @@ func Run(
 					}
 					toolOut, err = tools.ExecPostgresEmbedding(ctx, cli, *tc, query)
 
+				case "script":
+					toolOut, err = tools.ExecScript(*tc, args...)
+
 				default:
 					toolOut = "Tool type não suportado ainda"
 				}
@@ -212,13 +232,11 @@ func Run(
 				}
 				rv.ToolOutput = toolOut
 
-				// Quando reexecutar após tool:
 				b2 := newBuilder()
 				WithCachedContext(longPrompt)(b2)
 				if memBlock != "" {
 					WithSystemPrompt(memBlock)(b2)
 				}
-				// reaplica prompts extras (ex: financeiro.md)
 				for _, opt := range opts {
 					opt(b2)
 				}
@@ -237,7 +255,6 @@ func Run(
 		}
 	}
 
-	// Persistir mensagens + metadata
 	saveEg, saveCtx := errgroup.WithContext(context.Background())
 	saveEg.Go(func() error {
 		_, err := mem.SaveEmbeddedMessage(saveCtx, sessionID, "user", userMessage, userEmb)

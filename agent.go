@@ -15,7 +15,6 @@ type Agent struct {
 	verbose bool
 }
 
-// NewAgent inicializa memória, tools e cliente OpenAI
 func NewAgent(cfg *Config, verbose bool) (*Agent, error) {
 	if err := tools.LoadTools(cfg.ToolsPath); err != nil {
 		return nil, err
@@ -38,7 +37,6 @@ func NewAgent(cfg *Config, verbose bool) (*Agent, error) {
 	}, nil
 }
 
-// Run executa um agente SEM roteador
 func (a *Agent) Run(ctx context.Context, sessionID, basePromptPath, userMessage string) (string, error) {
 	return agent.Run(
 		ctx,
@@ -52,7 +50,6 @@ func (a *Agent) Run(ctx context.Context, sessionID, basePromptPath, userMessage 
 	)
 }
 
-// RouteAndRun executa um agente COM roteador
 func (a *Agent) RouteAndRun(ctx context.Context, sessionID, basePromptPath, userMessage, routerPath string) (string, error) {
 	return agent.RouteAndRun(
 		ctx,

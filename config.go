@@ -15,7 +15,6 @@ type Config struct {
 	ToolsPath    string
 }
 
-// NewConfigFromEnv lê variáveis de ambiente e monta uma Config
 func NewConfigFromEnv() (*Config, error) {
 	embDimStr := os.Getenv("EMBEDDING_DIM")
 	embDim, err := strconv.Atoi(embDimStr)

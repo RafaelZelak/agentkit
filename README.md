@@ -26,9 +26,9 @@ AgentKit uses environment variables. You can either export them manually or plac
 
 ## Optional: Tools
 
-### Define Tools
+### Define Database Tools
 
-Define tools in `tools.yml`. Example for Postgres:
+Define tools in `tools.yml`. Example for Database (Postgres):
 
 ```yaml
 - name: db_payment_slip
@@ -38,7 +38,84 @@ Define tools in `tools.yml`. Example for Postgres:
   query_template: "SELECT payment_status FROM schema.table WHERE payment_id = $1::int"
 ```
 
-### Call to Tool
+### Define Embedding Tool
+
+Define tools in `tools.yml`. Example for Embedding:
+
+```yaml
+- name: example_tool_embedding
+  description: "Semantic search in a database with its documentation"
+  type: postgres_embedding
+  conn: "ENV:PGSQL"
+  table: "documentation_example"
+  column: "return_column"
+  embedding_model: "text-embedding-3-small"
+  top_k: 20
+```
+
+### Define Script Tool
+
+Define tools in `tools.yml`. Example for Execute a script:
+
+```yml
+tools:
+  - name: example_script
+    description: "Example script that sums two numbers"
+    type: script
+    function: "sum($1, $2)"
+```
+
+### Create Script
+
+**Scripts** allow you to expose Go functions as tools for the agent.
+
+Inside your project, create a `scripts/` folder and add a file, for example `sum.go` (as defined in `tools.yml`).
+
+The file must contain an `init()` function that registers the function as an executable script for the Agent.
+
+> It is necessary to import the scripts module: `github.com/RafaelZelak/agentkit/internal/tools`
+
+Example of a sum file:
+
+```go
+// scripts/sum.go
+package scripts
+
+import (
+	"strconv"
+	"github.com/RafaelZelak/agentkit/internal/tools"
+)
+
+// init() runs automatically when the package is imported
+func init() {
+	tools.RegisterScript("sum", Sum)
+}
+
+// Function that will be called by the "example_script" tool
+func Sum(args ...string) (string, error) {
+	a, _ := strconv.Atoi(args[0])
+	b, _ := strconv.Atoi(args[1])
+	return strconv.Itoa(a + b), nil
+}
+```
+
+### Import Script
+
+In your project, where your `agent` is defined, import the `scripts` package as an **anonymous import (_)**:
+
+```go
+import (
+    _ "my_project/scripts" // or github.com/yourorg/yourproject/scripts
+)
+```
+
+#### Why this is safe
+
+Using the static registry makes script execution secure because the agent can only call functions that **you explicitly registered and whitelisted** in `tools.yml`. It has no access to your source code, cannot run arbitrary Go code, and cannot invent new tools. The agent’s scope is strictly limited to the safe functions you decide to expose.  
+
+> The responsibility for function safety, typing, validation, and business limits lies with the developer who implements the script, not with the library.
+
+### Call to Tools
 
 In your `.md` prompt, to call a `TOOL` you just need to describe the moment when the tool should be triggered, and use `TOOL:<tool_name>`. Example:
 

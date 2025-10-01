@@ -155,7 +155,6 @@ func (s *Store) RetrieveSimilar(ctx context.Context, sessionID string, queryEmbe
 	return out, nil
 }
 
-// NEW: Recupera as últimas N mensagens em ordem cronológica (antigas -> recentes).
 func (s *Store) RetrieveRecent(ctx context.Context, sessionID string, depth int) ([]HistoryItem, error) {
 	if depth <= 0 {
 		return nil, nil
@@ -179,21 +178,18 @@ func (s *Store) RetrieveRecent(ctx context.Context, sessionID string, depth int)
 			rev = append(rev, h)
 		}
 	}
-	// inverter para cronológico
 	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
 		rev[i], rev[j] = rev[j], rev[i]
 	}
 	return rev, nil
 }
 
-// Estrutura que salvamos em metadata.key = "tool_used"
 type toolUsed struct {
 	ToolRequested string   `json:"tool_requested"`
 	ToolArgs      []string `json:"tool_args"`
 	ToolOutput    string   `json:"tool_output"`
 }
 
-// NEW: Varre metadata de tool_used e monta o estado de boletos por sessão.
 func (s *Store) LoadBoletoStatus(ctx context.Context, sessionID string) (map[string]string, error) {
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT m.value
@@ -226,14 +222,13 @@ func (s *Store) LoadBoletoStatus(ctx context.Context, sessionID string) (map[str
 			continue
 		}
 		if st := parseStatusFromToolOutput(tu.ToolOutput); st != "" {
-			statusByID[id] = st // último valor vence
+			statusByID[id] = st
 		}
 	}
 	return statusByID, nil
 }
 
 func parseStatusFromToolOutput(out string) string {
-	// exemplo: "status=Pago \n" ou "status=Atrasado \n"
 	out = strings.TrimSpace(out)
 	idx := strings.Index(strings.ToLower(out), "status=")
 	if idx < 0 {
@@ -241,7 +236,6 @@ func parseStatusFromToolOutput(out string) string {
 	}
 	rest := out[idx+len("status="):]
 	rest = strings.TrimSpace(rest)
-	// corta em separadores comuns
 	for i, r := range rest {
 		if r == ' ' || r == '\n' || r == '\r' || r == '\t' {
 			return strings.TrimSpace(rest[:i])
@@ -275,7 +269,5 @@ func trimFloat(f float64) string {
 }
 
 func pqIdent(s string) string {
-	// mínimo para identificar nomes de schema/objeto (sem aspas duplas)
-	// se precisar de nomes com maiúsculas/espaços, adapte para usar aspas
 	return s
 }

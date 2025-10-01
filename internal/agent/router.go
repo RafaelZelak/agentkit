@@ -25,10 +25,6 @@ func envIntR(key string, def int) int {
 	return def
 }
 
-/*
-RouteAndRun:
-  - Igual ao fluxo normal, mas o roteamento também usa memória híbrida (recentes + semântica + fatos).
-*/
 func RouteAndRun(
 	ctx context.Context,
 	cli *openai.Client,
@@ -58,7 +54,6 @@ func RouteAndRun(
 		return Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, verbose, opts...)
 	}
 
-	// Carregar router.md
 	routerBytes, err := os.ReadFile(routerPath)
 	if err != nil {
 		return "", fmt.Errorf("read router: %w", err)
@@ -75,7 +70,6 @@ func RouteAndRun(
 	}
 	vr.Candidates = append(vr.Candidates, cands...)
 
-	// Recuperar memória híbrida
 	mem := memory.Get()
 	semTopK := envIntR("MEM_SEM_TOPK", 5)
 	memDepth := envIntR("MEM_DEPTH", 4)
@@ -86,24 +80,20 @@ func RouteAndRun(
 		faturas   map[string]string
 	)
 
-	// Similaridade
 	if emb, errEmb := cli.Embed(ctx, embeddingModel, userMessage); errEmb == nil {
 		if items, err := mem.RetrieveSimilar(ctx, sessionID, emb, semTopK); err == nil {
 			retrieved = items
 		}
 	}
 
-	// Últimas N mensagens
 	if items, err := mem.RetrieveRecent(ctx, sessionID, memDepth); err == nil {
 		recent = items
 	}
 
-	// Fatos estruturados (status boletos)
 	if m, err := mem.LoadBoletoStatus(ctx, sessionID); err == nil {
 		faturas = m
 	}
 
-	// Montar bloco de memória
 	var sb strings.Builder
 	if len(recent) > 0 {
 		sb.WriteString("== Memória curta ==\n")
@@ -130,7 +120,6 @@ func RouteAndRun(
 		routerInput = memBlock + "\nUsuário agora: " + userMessage
 	}
 
-	// Perguntar ao router qual prompt usar
 	chosen, raw, err := askRouter(ctx, cli, model, routerPrompt, routerInput, cands)
 	vr.RouterRaw = raw
 	if err != nil {
@@ -153,8 +142,6 @@ func RouteAndRun(
 	}
 	specPrompt := string(specBytes)
 
-	// Rodar com o prompt especializado
-	// Rodar com o prompt especializado
 	runOut, err := Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, verbose, append(opts, WithSystemPrompt(specPrompt))...)
 	if err != nil {
 		return "", err
@@ -162,7 +149,6 @@ func RouteAndRun(
 	vr.FinalText = runOut
 
 	if verbose {
-		// tentar decodificar o resultado do Run
 		var rv runVerbose
 		_ = json.Unmarshal([]byte(runOut), &rv)
 

@@ -13,3 +13,8 @@ tools:
     column: "return_column"
     embedding_model: "text-embedding-3-small"
     top_k: 20
+
+  - name: example_script
+    description: "Example script that sums two numbers"
+    type: script
+    function: "sum($1, $2)"
