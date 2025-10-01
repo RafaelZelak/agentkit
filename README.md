@@ -73,7 +73,7 @@ Inside your project, create a `scripts/` folder and add a file, for example `sum
 
 The file must contain an `init()` function that registers the function as an executable script for the Agent.
 
-> It is necessary to import the scripts module: `github.com/RafaelZelak/agentkit/internal/tools`
+> It is necessary to import the scripts module: `github.com/RafaelZelak/agentkit/sdk`
 
 Example of a sum file:
 
@@ -83,12 +83,12 @@ package scripts
 
 import (
 	"strconv"
-	"github.com/RafaelZelak/agentkit/internal/tools"
+	"github.com/RafaelZelak/agentkit/sdk"
 )
 
 // init() runs automatically when the package is imported
 func init() {
-	tools.RegisterScript("sum", Sum)
+	sdk.RegisterScript("sum", Sum)
 }
 
 // Function that will be called by the "example_script" tool
