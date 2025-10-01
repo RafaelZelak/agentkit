@@ -1,0 +1,21 @@
+tools:
+  - name: db_orders
+    description: "Consulta dados em um banco (pode ser qualquer tipo de query)"
+    type: postgres
+    conn: "ENV:SUPRABASE_PGSQL"
+    query_template: "SELECT tool FROM suporte.tool"
+
+  - name: db_boleto
+    description: "Consulta status boleto"
+    type: postgres
+    conn: "ENV:SUPRABASE_PGSQL"
+    query_template: "SELECT status FROM suporte.boleto WHERE id_boleto = $1::int"
+
+  - name: search_docs
+    description: "Busca semântica em documentação"
+    type: postgres_embedding
+    conn: "ENV:SUPRABASE_PGSQL"
+    table: "documentation_klinai"
+    column: "content"
+    embedding_model: "text-embedding-3-small"
+    top_k: 20
