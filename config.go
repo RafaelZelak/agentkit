@@ -25,7 +25,7 @@ func NewConfigFromEnv() (*Config, error) {
 
 	cfg := &Config{
 		APIKey:       os.Getenv("OPENAI_API_KEY"),
-		DSN:          os.Getenv("SUPRABASE_PGSQL"),
+		DSN:          os.Getenv("PGSQL"),
 		Schema:       os.Getenv("DB_SCHEMA"),
 		EmbeddingDim: embDim,
 		GPTModel:     os.Getenv("GPT_MODEL"),
