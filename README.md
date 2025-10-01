@@ -123,7 +123,7 @@ In your `.md` prompt, to call a `TOOL` you just need to describe the moment when
 1. **If the user asks for the status of a payment slip and provides the number (ID)**:
    - You **MUST** reply **only** in the following format:
      ```
-     TOOL:db_payment_slip <id>
+     TOOL:<tool_name> <arg> ...<args>...
      ```
 ````
 
