@@ -1,0 +1,25 @@
+agents:
+  - name: suporte
+    description: "Suporte técnico para testes"
+
+    # AI Configuration
+    api_key: ${OPENAI_API_KEY}
+    gpt_model: ${GPT_MODEL}
+    embedding_model: ${EMBEDDING_MODEL}
+    embedding_dim: 1536
+
+    # Database
+    dsn: ${PGSQL}
+    schema: ${DB_SCHEMA}
+
+    # Prompts
+    prompts_dir: prompts/suporte/
+    base_prompt: prompts/suporte/suporte.md
+    router_prompt: prompts/suporte/router.md
+
+    # Tools
+    tools_path: tools/suporte.yml
+
+    # Settings
+    timeout: 60s
+    verbose: true

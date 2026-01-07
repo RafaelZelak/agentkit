@@ -18,7 +18,7 @@ func WithSystemPrompt(prompt string) Option {
 			Type: "message",
 			Role: "system",
 			Content: []openai.ContentItem{
-				{Type: "input_text", Text: prompt},
+				{Type: "text", Text: prompt},
 			},
 		})
 	}
@@ -33,7 +33,7 @@ func WithCachedContext(text string) Option {
 			Type: "message",
 			Role: "system",
 			Content: []openai.ContentItem{
-				{Type: "input_text", Text: text},
+				{Type: "text", Text: text},
 			},
 		})
 		if b.promptCacheKey == "" {

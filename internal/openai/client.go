@@ -20,16 +20,22 @@ type Message struct {
 	Content []ContentItem `json:"content"`
 }
 
-type ResponsesRequest struct {
+type ChatCompletionRequest struct {
 	Model           string    `json:"model"`
-	Input           []Message `json:"input"`
-	PromptCacheKey  string    `json:"prompt_cache_key,omitempty"`
-	MaxOutputTokens int       `json:"max_output_tokens,omitempty"`
+	Messages        []Message `json:"messages"`
+	MaxOutputTokens int       `json:"max_tokens,omitempty"`
+}
+
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 type ResponseEnvelope struct {
 	ID         string         `json:"id"`
 	OutputText string         `json:"output_text"`
+	Usage      Usage          `json:"usage"`
 	Raw        map[string]any `json:"-"`
 }
 
@@ -60,14 +66,13 @@ func NewClient(apiKey string) *Client {
 	}
 }
 
-func (c *Client) Respond(ctx context.Context, req *ResponsesRequest) (*ResponseEnvelope, error) {
+func (c *Client) Respond(ctx context.Context, req *ChatCompletionRequest) (*ResponseEnvelope, error) {
 	body, _ := json.Marshal(req)
 
-	httpReq, _ := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/responses", bytes.NewBuffer(body))
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(body))
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	// Retry simples para 5xx
 	var resp *http.Response
 	var err error
 	for i := 0; i < 3; i++ {
@@ -100,26 +105,33 @@ func (c *Client) Respond(ctx context.Context, req *ResponsesRequest) (*ResponseE
 		return nil, fmt.Errorf("openai error: %s\n%v", resp.Status, errBody)
 	}
 
-	var raw map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	var rawResponse struct {
+		ID      string `json:"id"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage Usage          `json:"usage"`
+		Raw   map[string]any `json:"-"`
+	}
+
+	var rawMap map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&rawMap); err != nil {
 		return nil, err
 	}
 
-	out := &ResponseEnvelope{Raw: raw}
-	if v, ok := raw["id"].(string); ok {
-		out.ID = v
+	rawBytes, _ := json.Marshal(rawMap)
+	_ = json.Unmarshal(rawBytes, &rawResponse)
+
+	out := &ResponseEnvelope{
+		ID:    rawResponse.ID,
+		Usage: rawResponse.Usage,
+		Raw:   rawMap,
 	}
 
-	if outputArr, ok := raw["output"].([]any); ok && len(outputArr) > 0 {
-		if first, ok := outputArr[0].(map[string]any); ok {
-			if content, ok := first["content"].([]any); ok && len(content) > 0 {
-				if c0, ok := content[0].(map[string]any); ok {
-					if txt, ok := c0["text"].(string); ok {
-						out.OutputText = txt
-					}
-				}
-			}
-		}
+	if len(rawResponse.Choices) > 0 {
+		out.OutputText = rawResponse.Choices[0].Message.Content
 	}
 
 	return out, nil

@@ -17,10 +17,11 @@ import (
 )
 
 type runVerbose struct {
-	ToolRequested string   `json:"tool_requested,omitempty"`
-	ToolArgs      []string `json:"tool_args,omitempty"`
-	ToolOutput    string   `json:"tool_output,omitempty"`
-	FinalText     string   `json:"final_text"`
+	ToolRequested string        `json:"tool_requested,omitempty"`
+	ToolArgs      []string      `json:"tool_args,omitempty"`
+	ToolOutput    string        `json:"tool_output,omitempty"`
+	Usage         *openai.Usage `json:"usage,omitempty"`
+	FinalText     string        `json:"final_text"`
 }
 
 func (rv runVerbose) JSON() string {
@@ -111,8 +112,10 @@ func Run(
 	promptPath string,
 	userMessage string,
 	verbose bool,
+	mem *memory.Store,
+	toolReg *tools.Registry,
 	opts ...Option,
-) (string, error) {
+) (string, *openai.Usage, error) {
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
@@ -121,11 +124,9 @@ func Run(
 
 	promptBytes, err := os.ReadFile(promptPath)
 	if err != nil {
-		return "", fmt.Errorf("read prompt: %w", err)
+		return "", nil, fmt.Errorf("read prompt: %w", err)
 	}
 	longPrompt := string(promptBytes)
-
-	mem := memory.Get()
 
 	semTopK := envInt("MEM_SEM_TOPK", 5)
 	memDepth := envInt("MEM_DEPTH", 4)
@@ -178,19 +179,19 @@ func Run(
 	for _, opt := range opts {
 		opt(b)
 	}
-	b.user = openai.ContentItem{Type: "input_text", Text: userMessage}
+	b.user = openai.ContentItem{Type: "text", Text: userMessage}
 
 	req := b.req(model)
 	resp, err := cli.Respond(ctx, req)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	originalOut := strings.TrimSpace(resp.OutputText)
 
 	toolLine, hasTool := extractToolCommand(originalOut)
 
-	rv := runVerbose{FinalText: originalOut}
+	rv := runVerbose{FinalText: originalOut, Usage: &resp.Usage}
 
 	if hasTool {
 		parts := strings.Fields(toolLine)
@@ -200,7 +201,7 @@ func Run(
 			rv.ToolRequested = toolName
 			rv.ToolArgs = args
 
-			if tc := tools.GetTool(toolName); tc != nil {
+			if tc := toolReg.Get(toolName); tc != nil {
 				var toolOut string
 
 				switch tc.Type {
@@ -241,14 +242,15 @@ func Run(
 					opt(b2)
 				}
 				WithSystemPrompt("O resultado da tool '" + toolName + "' foi:\n" + toolOut + "\nVocê DEVE usar essa informação para responder o usuário.")(b2)
-				b2.user = openai.ContentItem{Type: "input_text", Text: userMessage}
+				b2.user = openai.ContentItem{Type: "text", Text: userMessage}
 
 				req2 := b2.req(model)
 				resp, err = cli.Respond(ctx, req2)
 				if err != nil {
-					return "", err
+					return "", nil, err
 				}
 				rv.FinalText = resp.OutputText
+				rv.Usage = &resp.Usage
 			} else {
 				rv.ToolOutput = "Tool não encontrada: " + toolName
 			}
@@ -262,10 +264,10 @@ func Run(
 	})
 	saveEg.Go(func() error {
 		var assistEmb []float32
-		if emb, err := cli.Embed(saveCtx, embeddingModel, rv.FinalText); err == nil {
+		if emb, err := cli.Embed(saveCtx, embeddingModel, originalOut); err == nil {
 			assistEmb = emb
 		}
-		id, err := mem.SaveEmbeddedMessage(saveCtx, sessionID, "assistant", rv.FinalText, assistEmb)
+		id, err := mem.SaveEmbeddedMessage(saveCtx, sessionID, "assistant", originalOut, assistEmb)
 		if err != nil {
 			return err
 		}
@@ -273,16 +275,20 @@ func Run(
 			_ = mem.SaveMetadata(saveCtx, id, "response_raw", resp.Raw)
 		}
 		if rv.ToolRequested != "" {
-			_ = mem.SaveMetadata(saveCtx, id, "tool_used", rv)
+			_ = mem.SaveMetadata(saveCtx, id, "tool_used", map[string]any{
+				"tool":   rv.ToolRequested,
+				"args":   rv.ToolArgs,
+				"output": rv.ToolOutput,
+			})
 		}
 		return nil
 	})
 	if err := saveEg.Wait(); err != nil {
-		return "", fmt.Errorf("persist failed: %w", err)
+		return "", nil, fmt.Errorf("persist failed: %w", err)
 	}
 
 	if verbose {
-		return rv.JSON(), nil
+		return rv.JSON(), rv.Usage, nil
 	}
-	return rv.FinalText, nil
+	return rv.FinalText, rv.Usage, nil
 }

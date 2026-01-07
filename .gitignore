@@ -22,6 +22,6 @@ go.work.sum
 .idea/
 *.swp
 
-cmd/
-prompt
-scripts
+prompts/
+scripts/
+tools/

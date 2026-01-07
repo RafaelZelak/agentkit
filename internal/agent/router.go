@@ -14,6 +14,7 @@ import (
 
 	"github.com/RafaelZelak/agentkit/internal/memory"
 	"github.com/RafaelZelak/agentkit/internal/openai"
+	"github.com/RafaelZelak/agentkit/internal/tools"
 )
 
 func envIntR(key string, def int) int {
@@ -35,8 +36,10 @@ func RouteAndRun(
 	userMessage string,
 	routerPath string,
 	verbose bool,
+	mem *memory.Store,
+	toolReg *tools.Registry,
 	opts ...Option,
-) (string, error) {
+) (string, *openai.Usage, error) {
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
@@ -45,32 +48,31 @@ func RouteAndRun(
 
 	vr := routeVerbose{
 		RouterEnabled: routerPath != "",
-		RouterPath:    routerPath,
 		BasePrompt:    basePromptPath,
 		UserMessage:   userMessage,
+		SessionID:     sessionID,
 	}
 
 	if routerPath == "" {
-		return Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, verbose, opts...)
+		return Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, verbose, mem, toolReg, opts...)
 	}
 
 	routerBytes, err := os.ReadFile(routerPath)
 	if err != nil {
-		return "", fmt.Errorf("read router: %w", err)
+		return "", nil, fmt.Errorf("read router: %w", err)
 	}
 	routerPrompt := string(routerBytes)
 
 	dir := filepath.Dir(routerPath)
 	cands, err := listPromptCandidates(dir)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if len(cands) == 0 {
-		return "", fmt.Errorf("no candidates in %s", dir)
+		return "", nil, fmt.Errorf("no candidates in %s", dir)
 	}
 	vr.Candidates = append(vr.Candidates, cands...)
 
-	mem := memory.Get()
 	semTopK := envIntR("MEM_SEM_TOPK", 5)
 	memDepth := envIntR("MEM_DEPTH", 4)
 
@@ -120,88 +122,69 @@ func RouteAndRun(
 		routerInput = memBlock + "\nUsuário agora: " + userMessage
 	}
 
-	chosen, raw, err := askRouter(ctx, cli, model, routerPrompt, routerInput, cands)
-	vr.RouterRaw = raw
+	chosen, _, err := askRouter(ctx, cli, model, routerPrompt, routerInput, cands)
 	if err != nil {
 		vr.RouterError = err.Error()
 		chosen = fallbackCandidate(cands, "geral.md")
 	}
-	vr.Chosen = chosen
-	vr.SpecialPrompt = filepath.Join(dir, chosen)
+	vr.ChosenPrompt = chosen
+	specPromptPath := filepath.Join(dir, chosen)
 
-	specBytes, err := os.ReadFile(vr.SpecialPrompt)
+	specBytes, err := os.ReadFile(specPromptPath)
 	if err != nil {
 		vr.RouterError = "chosen prompt not found: " + err.Error()
 		chosen = fallbackCandidate(cands, "geral.md")
-		vr.Chosen = chosen
-		vr.SpecialPrompt = filepath.Join(dir, chosen)
-		specBytes, err = os.ReadFile(vr.SpecialPrompt)
+		vr.ChosenPrompt = chosen
+		specPromptPath = filepath.Join(dir, chosen)
+		specBytes, err = os.ReadFile(specPromptPath)
 		if err != nil {
-			return "", fmt.Errorf("read chosen prompt: %w", err)
+			return "", nil, fmt.Errorf("read chosen prompt: %w", err)
 		}
 	}
 	specPrompt := string(specBytes)
 
-	runOut, err := Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, verbose, append(opts, WithSystemPrompt(specPrompt))...)
+	runOut, usage, err := Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, verbose, mem, toolReg, append(opts, WithSystemPrompt(specPrompt))...)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	vr.FinalText = runOut
+	vr.Usage = usage
 
 	if verbose {
 		var rv runVerbose
-		_ = json.Unmarshal([]byte(runOut), &rv)
-
-		type merged struct {
-			RouterEnabled bool     `json:"router_enabled"`
-			RouterPath    string   `json:"router_path,omitempty"`
-			BasePrompt    string   `json:"base_prompt"`
-			UserMessage   string   `json:"user_message"`
-			Candidates    []string `json:"candidates,omitempty"`
-			RouterRaw     string   `json:"router_raw,omitempty"`
-			RouterError   string   `json:"router_error,omitempty"`
-			Chosen        string   `json:"chosen,omitempty"`
-			SpecialPrompt string   `json:"special_prompt,omitempty"`
-			ToolRequested string   `json:"tool_requested,omitempty"`
-			ToolArgs      []string `json:"tool_args,omitempty"`
-			ToolOutput    string   `json:"tool_output,omitempty"`
-			FinalText     string   `json:"final_text"`
+		// Se Run retornou JSON, fazemos unmarshal para extrair dados
+		if json.Unmarshal([]byte(runOut), &rv) == nil {
+			// Mesclar dados de Run em vr
+			if rv.FinalText != "" {
+				vr.FinalText = rv.FinalText
+			}
+			if rv.ToolRequested != "" {
+				vr.ToolRequested = rv.ToolRequested
+				vr.ToolArgs = rv.ToolArgs
+				vr.ToolOutput = rv.ToolOutput
+			}
+			if rv.Usage != nil {
+				vr.Usage = rv.Usage
+			}
 		}
-		out := merged{
-			RouterEnabled: vr.RouterEnabled,
-			RouterPath:    vr.RouterPath,
-			BasePrompt:    vr.BasePrompt,
-			UserMessage:   vr.UserMessage,
-			Candidates:    vr.Candidates,
-			RouterRaw:     vr.RouterRaw,
-			RouterError:   vr.RouterError,
-			Chosen:        vr.Chosen,
-			SpecialPrompt: vr.SpecialPrompt,
-			FinalText:     vr.FinalText,
-		}
-		if rv.FinalText != "" || rv.ToolRequested != "" {
-			out.ToolRequested = rv.ToolRequested
-			out.ToolArgs = rv.ToolArgs
-			out.ToolOutput = rv.ToolOutput
-			out.FinalText = rv.FinalText
-		}
-		js, _ := json.MarshalIndent(out, "", "  ")
-		return string(js), nil
+		return vr.JSON(), vr.Usage, nil
 	}
-	return runOut, nil
+	return runOut, usage, nil
 }
 
 type routeVerbose struct {
-	RouterEnabled bool     `json:"router_enabled"`
-	RouterPath    string   `json:"router_path,omitempty"`
-	BasePrompt    string   `json:"base_prompt"`
-	UserMessage   string   `json:"user_message"`
-	Candidates    []string `json:"candidates,omitempty"`
-	RouterRaw     string   `json:"router_raw,omitempty"`
-	RouterError   string   `json:"router_error,omitempty"`
-	Chosen        string   `json:"chosen,omitempty"`
-	SpecialPrompt string   `json:"special_prompt,omitempty"`
-	FinalText     string   `json:"final_text"`
+	RouterEnabled bool          `json:"router_enabled"`
+	BasePrompt    string        `json:"base_prompt"`
+	UserMessage   string        `json:"user_message"`
+	SessionID     string        `json:"session_id"`
+	Candidates    []string      `json:"candidates,omitempty"`
+	RouterError   string        `json:"router_error,omitempty"`
+	ChosenPrompt  string        `json:"chosen_prompt,omitempty"`
+	ToolRequested string        `json:"tool_requested,omitempty"`
+	ToolArgs      []string      `json:"tool_args,omitempty"`
+	ToolOutput    string        `json:"tool_output,omitempty"`
+	Usage         *openai.Usage `json:"usage,omitempty"`
+	FinalText     string        `json:"final_text"`
 }
 
 func (r routeVerbose) JSON() string {
@@ -302,20 +285,20 @@ func askRouter(
 		Type: "message",
 		Role: "system",
 		Content: []openai.ContentItem{
-			{Type: "input_text", Text: sb.String()},
+			{Type: "text", Text: sb.String()},
 		},
 	}
 	user := openai.Message{
 		Type: "message",
 		Role: "user",
 		Content: []openai.ContentItem{
-			{Type: "input_text", Text: userMessage},
+			{Type: "text", Text: userMessage},
 		},
 	}
 
-	req := &openai.ResponsesRequest{
+	req := &openai.ChatCompletionRequest{
 		Model:           model,
-		Input:           []openai.Message{sys, user},
+		Messages:        []openai.Message{sys, user},
 		MaxOutputTokens: 32,
 	}
 

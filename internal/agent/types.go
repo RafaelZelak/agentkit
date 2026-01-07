@@ -14,19 +14,18 @@ func newBuilder() *builder {
 	}
 }
 
-func (b *builder) req(model string) *openai.ResponsesRequest {
-	input := make([]openai.Message, 0, len(b.system)+1)
-	input = append(input, b.system...)
-	input = append(input, openai.Message{
+func (b *builder) req(model string) *openai.ChatCompletionRequest {
+	messages := make([]openai.Message, 0, len(b.system)+1)
+	messages = append(messages, b.system...)
+	messages = append(messages, openai.Message{
 		Type: "message",
 		Role: "user",
 		Content: []openai.ContentItem{
 			b.user,
 		},
 	})
-	return &openai.ResponsesRequest{
-		Model:          model,
-		Input:          input,
-		PromptCacheKey: b.promptCacheKey,
+	return &openai.ChatCompletionRequest{
+		Model:    model,
+		Messages: messages,
 	}
 }

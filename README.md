@@ -1,206 +1,250 @@
-# AgentKit
+# AgentKit 🤖
 
-AgentKit is a **Go library** for building modular AI-powered agents with memory, routing, and tool integration.
+**AgentKit** é uma biblioteca Go modular e poderosa para construir agentes de Inteligência Artificial com memória persistente, roteamento inteligente de prompts e integração extensível de ferramentas.
 
-This README focuses on how to **install**, **configure**, and **use** the library.
+Projetada para ser simples de usar, mas robusta o suficiente para aplicações complexas multi-agente.
 
 ---
 
-## Installation
+## 🚀 Instalação
 
-Install AgentKit with:
+Adicione o AgentKit ao seu projeto Go:
 
 ```bash
-go get github.com/RafaelZelak/agentkit@v0.1.0
+go get github.com/RafaelZelak/agentkit@latest
 ```
 
 ---
 
-## Configuration
+## ⚡ Quick Start
 
-AgentKit uses environment variables. You can either export them manually or place them in a `.env` file in your project root.
+A maneira mais fácil de começar é utilizando o arquivo de configuração `agents.yml`.
 
-> Use the .env.example as a reference to configure your environment variables.
+### 1. Estrutura do Projeto Recomendada
 
----
-
-## Optional: Tools
-
-### Define Database Tools
-
-Define tools in `tools.yml`. Example for Database (Postgres):
-
-```yaml
-- name: db_payment_slip
-  description: "Example SQL query to fetch Payment Slip using the ID"
-  type: postgres
-  conn: "ENV:PGSQL"
-  query_template: "SELECT payment_status FROM schema.table WHERE payment_id = $1::int"
-```
-
-### Define Embedding Tool
-
-Define tools in `tools.yml`. Example for Embedding:
-
-```yaml
-- name: example_tool_embedding
-  description: "Semantic search in a database with its documentation"
-  type: postgres_embedding
-  conn: "ENV:PGSQL"
-  table: "documentation_example"
-  column: "return_column"
-  embedding_model: "text-embedding-3-small"
-  top_k: 20
-```
-
-### Define Script Tool
-
-Define tools in `tools.yml`. Example for Execute a script:
-
-```yml
-tools:
-  - name: example_script
-    description: "Example script that sums two numbers"
-    type: script
-    function: "sum($1, $2)"
-```
-
-### Create Script
-
-**Scripts** allow you to expose Go functions as tools for the agent.
-
-Inside your project, create a `scripts/` folder and add a file, for example `sum.go` (as defined in `tools.yml`).
-
-The file must contain an `init()` function that registers the function as an executable script for the Agent.
-
-> It is necessary to import the scripts module: `github.com/RafaelZelak/agentkit/sdk`
-
-Example of a sum file:
-
-```go
-// scripts/sum.go
-package scripts
-
-import (
-	"strconv"
-	"github.com/RafaelZelak/agentkit/sdk"
-)
-
-// init() runs automatically when the package is imported
-func init() {
-	sdk.RegisterScript("sum", Sum)
-}
-
-// Function that will be called by the "example_script" tool
-func Sum(args ...string) (string, error) {
-	a, _ := strconv.Atoi(args[0])
-	b, _ := strconv.Atoi(args[1])
-	return strconv.Itoa(a + b), nil
-}
-```
-
-### Import Script
-
-In your project, where your `agent` is defined, import the `scripts` package as an **anonymous import (_)**:
-
-```go
-import (
-    _ "my_project/scripts" // or github.com/yourorg/yourproject/scripts
-)
-```
-
-#### Why this is safe
-
-Using the static registry makes script execution secure because the agent can only call functions that **you explicitly registered and whitelisted** in `tools.yml`. It has no access to your source code, cannot run arbitrary Go code, and cannot invent new tools. The agent’s scope is strictly limited to the safe functions you decide to expose.  
-
-> The responsibility for function safety, typing, validation, and business limits lies with the developer who implements the script, not with the library.
-
-### Call to Tools
-
-In your `.md` prompt, to call a `TOOL` you just need to describe the moment when the tool should be triggered, and use `TOOL:<tool_name>`. Example:
-
-````md
-1. **If the user asks for the status of a payment slip and provides the number (ID)**:
-   - You **MUST** reply **only** in the following format:
-     ```
-     TOOL:<tool_name> <arg> ...<args>...
-     ```
-````
-
-This way, when the question is about the status of a payment slip, the Agent will run the tool and pass the payment slip id: `TOOL:db_payment_slip <id>`, and using the return, will generate a response.
-
----
-
-## Example Project Structure (Basic)
+Organize seu projeto para manter prompts e configurações limpos:
 
 ```
 my-project/
-├── .env
-├── go.mod
-├── go.sum
-├── main.go
-├── prompt/
-│   └── suporte/
-│       ├── financeiro.md
-│       ├── geral.md
-│       ├── router.md
-│       ├── suporte.md
-│       └── tecnico.md
-└── tools.yml (Optional)
+├── agents.yml          # Configuração central dos agentes
+├── .env                # Variáveis de ambiente (API Keys, DB)
+├── main.go             # Ponto de entrada da aplicação
+├── prompts/            # Diretório de prompts
+│   ├── suporte/
+│   │   ├── base.md
+│   │   └── router.md
+│   └── vendas/
+│       └── base.md
+└── tools/              # Diretório de configuração de ferramentas
+    └── suporte.yml
 ```
 
----
+### 2. Configuração (`agents.yml`)
 
-## Example Usage
+O arquivo `agents.yml` permite definir múltiplos agentes, cada um com sua própria memória, modelo e ferramentas.
+
+```yaml
+agents:
+  - name: suporte
+    description: "Agente de Suporte Técnico Nível 1"
+
+    # Configuração da IA
+    api_key: ${OPENAI_API_KEY} # Suporta expansão de variáveis de ambiente
+    gpt_model: gpt-4o # Modelo de chat
+    embedding_model: text-embedding-3-small # Modelo de embedding (opcional)
+    embedding_dim: 1536 # Dimensão do embedding (padrão: 1536)
+
+    # Memória Persistente (PostgreSQL)
+    dsn: ${PGSQL_DSN} # String de conexão Postgres
+    schema: suporte_memory # Schema isolado para este agente
+
+    # Prompts
+    prompts_dir: prompts/suporte/ # Diretório base dos prompts
+    base_prompt: prompts/suporte/base.md # Prompt principal
+    router_prompt: prompts/suporte/router.md # (Opcional) Ativa o Roteamento Inteligente
+
+    # Ferramentas
+    tools_path: tools/suporte.yml # Arquivo de definição das tools
+
+    # Configurações Extras
+    timeout: 60s # Timeout global para respostas
+    verbose: true # Retorna JSON detalhado com metadados e uso de tokens
+```
+
+### 3. Exemplo de Uso (`main.go`)
 
 ```go
 package main
 
 import (
-    "context"
     "fmt"
     "log"
-
     "github.com/RafaelZelak/agentkit"
+
+    // Importe seus scripts customizados para que o init() deles seja executado
+    _ "my-project/scripts"
 )
 
 func main() {
-    // Load configuration from env
-    cfg, err := agentkit.NewConfigFromEnv()
+    // 1. Carrega todos os agentes definidos no YAML
+    manager, err := agentkit.LoadAgents("agents.yml")
     if err != nil {
-        log.Fatal("Error loading config: ", err)
+        log.Fatal("Erro ao carregar agentes:", err)
     }
+    defer manager.Close() // Fecha conexões de banco de dados
 
-    // Create new Agent (verbose = true for debug JSON)
-    ag, err := agentkit.NewAgent(cfg, true)
-    if err != nil {
-        log.Fatal("Error creating agent: ", err)
-    }
+    // 2. Interage com um agente específico pelo nome
+    sessionID := "user-session-123" // ID da sessão para manter o contexto da conversa
 
-    // Run with router
-    out, err := ag.RouteAndRun(
-        context.Background(),
-        "session123",                // session ID
-        "prompt/suporte/suporte.md", // base prompt
-        "Hello, I want to know my bill status", // user message
-        "prompt/suporte/router.md",  // router
-    )
+    response, err := manager.Chat("suporte", sessionID, "Tenho uma dúvida sobre minha fatura")
     if err != nil {
         log.Fatal(err)
     }
 
-    fmt.Println(out)
+    fmt.Println("Resposta do Agente:")
+    fmt.Println(response)
 }
 ```
 
 ---
 
-## Summary
+## 🛠️ Ferramentas (Tools)
 
-1. Install the lib with `go get github.com/RafaelZelak/agentkit@v0.1.0`
-2. Configure `.env` with your API keys and DB connection
-3. Optionally define tools in `tools.yml`
-4. Write your own prompts under `prompt/`
-5. Run your agent with `go run main.go`
+O AgentKit permite que seus agentes executem ações reais através de **Tools**. As tools são definidas em arquivos YAML (ex: `tools/suporte.yml`) e podem ser de três tipos:
 
-That's it — you have a fully working AI Agent in Go!
+### 1. `postgres` (Banco de Dados)
+
+Executa consultas SQL seguras diretamente no banco de dados. Ideal para buscar informações transacionais (status de pedidos, saldo, cadastro).
+
+**Configuração (`tools/suporte.yml`):**
+
+```yaml
+- name: consultar_fatura
+  description: "Busca o status e valor de uma fatura pelo ID"
+  type: postgres
+  conn: "ENV:PGSQL_DSN" # Lê a string de conexão da variável de ambiente
+  query_template: "SELECT status, valor, vencimento FROM faturas WHERE id = $1::int"
+```
+
+**Como o Agente usa:**
+O agente gera internamente o comando: `TOOL:consultar_fatura 12345`
+
+---
+
+### 2. `postgres_embedding` (Busca Semântica / RAG)
+
+Realiza busca vetorial em uma tabela PostgreSQL com suporte a `pgvector`. Essencial para criar sistemas de RAG (Retrieval-Augmented Generation), permitindo que o agente consulte grandes bases de conhecimento.
+
+**Pré-requisitos:**
+
+- Extensão `vector` habilitada no Postgres.
+- Tabela com uma coluna do tipo `vector`.
+
+**Configuração (`tools/suporte.yml`):**
+
+```yaml
+- name: buscar_documentacao
+  description: "Busca na base de conhecimento técnica por similaridade"
+  type: postgres_embedding
+  conn: "ENV:PGSQL_DSN"
+  table: "documentacao" # Tabela alvo
+  column: "conteudo" # Coluna de texto para retorno
+  embedding_model: "text-embedding-3-small" # Modelo usado para gerar o vetor da query
+  top_k: 5 # Número de resultados mais relevantes a retornar
+```
+
+**Como o Agente usa:**
+O agente gera: `TOOL:buscar_documentacao "como configurar roteador modelo X"`
+
+---
+
+### 3. `script` (Funções Go Customizadas)
+
+Permite executar lógica de negócio complexa escrita em Go. Você registra uma função Go e a expõe para o agente.
+
+**Passo 1: Definir no YAML (`tools/suporte.yml`)**
+
+```yaml
+- name: calcular_juros
+  description: "Calcula juros compostos de um boleto atrasado"
+  type: script
+  function: "CalcJuros($1, $2)" # $1 será o valor, $2 será os meses de atraso
+```
+
+**Passo 2: Registrar no Go**
+Crie um pacote (ex: `scripts/financeiro.go`) e registre a função no `init()`.
+
+```go
+package scripts
+
+import (
+    "fmt"
+    "strconv"
+    "github.com/RafaelZelak/agentkit/sdk"
+)
+
+func init() {
+    // Registra a função "CalcJuros" para ser usada pelo AgentKit
+    sdk.RegisterScript("CalcJuros", CalcularJuros)
+}
+
+// A assinatura deve ser sempre: func(args ...string) (string, error)
+func CalcularJuros(args ...string) (string, error) {
+    if len(args) < 2 {
+        return "", fmt.Errorf("argumentos insuficientes")
+    }
+
+    valor, _ := strconv.ParseFloat(args[0], 64)
+    meses, _ := strconv.Atoi(args[1])
+
+    total := valor * (1 + 0.02*float64(meses)) // Exemplo simples
+
+    return fmt.Sprintf("%.2f", total), nil
+}
+```
+
+---
+
+## 🧠 Roteamento Inteligente (Router)
+
+O AgentKit possui um sistema nativo de roteamento de intenções. Isso permite que um único agente "mude de personalidade" ou utilize prompts especializados dependendo do que o usuário pede.
+
+**Como funciona:**
+
+1. Configure `router_prompt` no `agents.yml`.
+2. Crie arquivos `.md` na pasta `prompts_dir` (ex: `financeiro.md`, `tecnico.md`, `vendas.md`).
+3. O `router_prompt` deve instruir o modelo a classificar a intenção e retornar apenas o nome do arquivo (ex: `financeiro.md`).
+
+**Fluxo:**
+`Usuário` -> `Router (Analisa)` -> `Seleciona Prompt Especialista` -> `Agente Executa (com Prompt Especialista)`
+
+Isso melhora drasticamente a qualidade das respostas em domínios complexos.
+
+---
+
+## 📊 Verbose Mode & JSON Output
+
+Para integrações via API, é útil receber não apenas o texto da resposta, mas também metadados sobre o processo de decisão e uso de recursos.
+
+Ao definir `verbose: true` no `agents.yml`, o método `Chat` retornará uma string JSON contendo:
+
+```json
+{
+  "router_enabled": true,
+  "base_prompt": "prompts/suporte/base.md",
+  "user_message": "Qual o valor dos juros para 10 meses?",
+  "session_id": "user-123",
+  "chosen_prompt": "financeiro.md",
+  "tool_requested": "calcular_juros",
+  "tool_args": ["1000", "10"],
+  "tool_output": "1200.00",
+  "usage": {
+    "prompt_tokens": 500,
+    "completion_tokens": 50,
+    "total_tokens": 550
+  },
+  "final_text": "O valor atualizado com juros é R$ 1.200,00."
+}
+```
+
+Se `verbose: false`, o retorno será apenas a string: `"O valor atualizado com juros é R$ 1.200,00."`
