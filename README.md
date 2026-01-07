@@ -1,4 +1,4 @@
-# AgentKit 🤖
+# AgentKit
 
 **AgentKit** é uma biblioteca Go modular e poderosa para construir agentes de Inteligência Artificial com memória persistente, roteamento inteligente de prompts e integração extensível de ferramentas.
 
@@ -6,7 +6,7 @@ Projetada para ser simples de usar, mas robusta o suficiente para aplicações c
 
 ---
 
-## 🚀 Instalação
+## Instalação
 
 Adicione o AgentKit ao seu projeto Go:
 
@@ -16,7 +16,7 @@ go get github.com/RafaelZelak/agentkit@latest
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
 A maneira mais fácil de começar é utilizando o arquivo de configuração `agents.yml`.
 
@@ -108,7 +108,7 @@ func main() {
 
 ---
 
-## 🛠️ Ferramentas (Tools)
+## Ferramentas (Tools)
 
 O AgentKit permite que seus agentes executem ações reais através de **Tools**. As tools são definidas em arquivos YAML (ex: `tools/suporte.yml`) e podem ser de três tipos:
 
@@ -205,7 +205,7 @@ func CalcularJuros(args ...string) (string, error) {
 
 ---
 
-## 🧠 Roteamento Inteligente (Router)
+## Roteamento Inteligente (Router)
 
 O AgentKit possui um sistema nativo de roteamento de intenções. Isso permite que um único agente "mude de personalidade" ou utilize prompts especializados dependendo do que o usuário pede.
 
@@ -222,7 +222,7 @@ Isso melhora drasticamente a qualidade das respostas em domínios complexos.
 
 ---
 
-## 📊 Verbose Mode & JSON Output
+## Verbose Mode & JSON Output
 
 Para integrações via API, é útil receber não apenas o texto da resposta, mas também metadados sobre o processo de decisão e uso de recursos.
 
