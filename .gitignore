@@ -24,4 +24,6 @@ go.work.sum
 
 prompts/
 scripts/
+cmd/main.go
 suporte.yml
+agents.yml

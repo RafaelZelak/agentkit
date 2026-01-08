@@ -11,13 +11,13 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func ExecPostgres(ctx context.Context, cfg ToolConfig, args ...any) (string, error) {
-	db, err := sql.Open("postgres", cfg.Conn)
-	if err != nil {
-		return "", err
-	}
-	defer db.Close()
+type DBExecutor interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
 
+var sqlOpen = sql.Open
+
+func execPostgresWithDB(ctx context.Context, db DBExecutor, cfg ToolConfig, args ...any) (string, error) {
 	rows, err := db.QueryContext(ctx, cfg.QueryTemplate, args...)
 	if err != nil {
 		return "", err
@@ -45,10 +45,25 @@ func ExecPostgres(ctx context.Context, cfg ToolConfig, args ...any) (string, err
 		}
 		results += row + "\n"
 	}
+
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
 	if results == "" {
 		results = "Nenhum resultado encontrado."
 	}
 	return results, nil
+}
+
+func ExecPostgres(ctx context.Context, cfg ToolConfig, args ...any) (string, error) {
+	db, err := sqlOpen("postgres", cfg.Conn)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	return execPostgresWithDB(ctx, db, cfg, args...)
 }
 
 func ExecPostgresEmbedding(ctx context.Context, cli *openai.Client, cfg ToolConfig, query string) (string, error) {
@@ -66,7 +81,7 @@ func ExecPostgresEmbedding(ctx context.Context, cli *openai.Client, cfg ToolConf
 
 	vec := encodeVector(emb)
 
-	db, err := sql.Open("postgres", cfg.Conn)
+	db, err := sqlOpen("postgres", cfg.Conn)
 	if err != nil {
 		return "", err
 	}
@@ -93,6 +108,10 @@ func ExecPostgresEmbedding(ctx context.Context, cli *openai.Client, cfg ToolConf
 			return "", err
 		}
 		results = append(results, content)
+	}
+
+	if err := rows.Err(); err != nil {
+		return "", err
 	}
 
 	if len(results) == 0 {
