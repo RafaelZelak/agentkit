@@ -35,8 +35,6 @@ var (
 	storeErr  error
 )
 
-// NewStore cria uma nova instância de Store.
-// Permite múltiplas instâncias para diferentes agentes.
 func NewStore(cfg Config) (*Store, error) {
 	db, err := sql.Open("postgres", cfg.DSN)
 	if err != nil {
@@ -54,7 +52,14 @@ func NewStore(cfg Config) (*Store, error) {
 	return s, nil
 }
 
-// Close fecha a conexão com o banco de dados.
+func NewStoreWithDB(db *sql.DB, cfg Config) *Store {
+	return &Store{
+		db:           db,
+		schema:       cfg.Schema,
+		embeddingDim: cfg.EmbeddingDim,
+	}
+}
+
 func (s *Store) Close() error {
 	if s.db != nil {
 		return s.db.Close()
@@ -62,8 +67,6 @@ func (s *Store) Close() error {
 	return nil
 }
 
-// Init inicializa o store singleton global.
-// Deprecated: Use NewStore para criar instâncias independentes.
 func Init(cfg Config) (*Store, error) {
 	storeOnce.Do(func() {
 		db, err := sql.Open("postgres", cfg.DSN)
@@ -85,8 +88,6 @@ func Init(cfg Config) (*Store, error) {
 	return storeInst, storeErr
 }
 
-// Get retorna o store singleton global.
-// Deprecated: Use NewStore para criar instâncias independentes.
 func Get() *Store {
 	if storeInst == nil {
 		panic("memory store not initialized: call memory.Init first")

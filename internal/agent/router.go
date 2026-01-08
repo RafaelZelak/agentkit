@@ -26,6 +26,34 @@ func envIntR(key string, def int) int {
 	return def
 }
 
+type PromptInfo struct {
+	RouterEnabled bool     `json:"router_enabled"`
+	BasePrompt    string   `json:"base_prompt"`
+	UserMessage   string   `json:"user_message"`
+	SessionID     string   `json:"session_id"`
+	Candidates    []string `json:"candidates,omitempty"`
+	ChosenPrompt  string   `json:"chosen_prompt,omitempty"`
+	RouterError   string   `json:"router_error,omitempty"`
+}
+
+type ToolInfo struct {
+	ToolRequested string   `json:"tool_requested"`
+	ToolArgs      []string `json:"tool_args"`
+	ToolOutput    string   `json:"tool_output"`
+}
+
+type Response struct {
+	Prompt    PromptInfo    `json:"prompt"`
+	Tools     []ToolInfo    `json:"tools,omitempty"`
+	Usage     *openai.Usage `json:"usage,omitempty"`
+	FinalText string        `json:"final_text"`
+}
+
+func (r Response) JSON() string {
+	js, _ := json.MarshalIndent(r, "", "  ")
+	return string(js)
+}
+
 func RouteAndRun(
 	ctx context.Context,
 	cli *openai.Client,
@@ -46,15 +74,42 @@ func RouteAndRun(
 		defer cancel()
 	}
 
-	vr := routeVerbose{
-		RouterEnabled: routerPath != "",
-		BasePrompt:    basePromptPath,
-		UserMessage:   userMessage,
-		SessionID:     sessionID,
+	resp := Response{
+		Prompt: PromptInfo{
+			RouterEnabled: routerPath != "",
+			BasePrompt:    basePromptPath,
+			UserMessage:   userMessage,
+			SessionID:     sessionID,
+		},
 	}
 
 	if routerPath == "" {
-		return Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, verbose, mem, toolReg, opts...)
+
+		runOut, usage, err := Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, true, mem, toolReg, opts...)
+		if err != nil {
+			return "", nil, err
+		}
+
+		var rv runVerbose
+		if json.Unmarshal([]byte(runOut), &rv) == nil {
+			resp.FinalText = rv.FinalText
+			resp.Usage = rv.Usage
+			if rv.ToolRequested != "" {
+				resp.Tools = []ToolInfo{{
+					ToolRequested: rv.ToolRequested,
+					ToolArgs:      rv.ToolArgs,
+					ToolOutput:    rv.ToolOutput,
+				}}
+			}
+		} else {
+			resp.FinalText = runOut
+			resp.Usage = usage
+		}
+
+		if verbose {
+			return resp.JSON(), resp.Usage, nil
+		}
+		return resp.FinalText, resp.Usage, nil
 	}
 
 	routerBytes, err := os.ReadFile(routerPath)
@@ -71,7 +126,7 @@ func RouteAndRun(
 	if len(cands) == 0 {
 		return "", nil, fmt.Errorf("no candidates in %s", dir)
 	}
-	vr.Candidates = append(vr.Candidates, cands...)
+	resp.Prompt.Candidates = append(resp.Prompt.Candidates, cands...)
 
 	semTopK := envIntR("MEM_SEM_TOPK", 5)
 	memDepth := envIntR("MEM_DEPTH", 4)
@@ -124,17 +179,17 @@ func RouteAndRun(
 
 	chosen, _, err := askRouter(ctx, cli, model, routerPrompt, routerInput, cands)
 	if err != nil {
-		vr.RouterError = err.Error()
+		resp.Prompt.RouterError = err.Error()
 		chosen = fallbackCandidate(cands, "geral.md")
 	}
-	vr.ChosenPrompt = chosen
+	resp.Prompt.ChosenPrompt = chosen
 	specPromptPath := filepath.Join(dir, chosen)
 
 	specBytes, err := os.ReadFile(specPromptPath)
 	if err != nil {
-		vr.RouterError = "chosen prompt not found: " + err.Error()
+		resp.Prompt.RouterError = "chosen prompt not found: " + err.Error()
 		chosen = fallbackCandidate(cands, "geral.md")
-		vr.ChosenPrompt = chosen
+		resp.Prompt.ChosenPrompt = chosen
 		specPromptPath = filepath.Join(dir, chosen)
 		specBytes, err = os.ReadFile(specPromptPath)
 		if err != nil {
@@ -143,51 +198,31 @@ func RouteAndRun(
 	}
 	specPrompt := string(specBytes)
 
-	runOut, usage, err := Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, verbose, mem, toolReg, append(opts, WithSystemPrompt(specPrompt))...)
+	runOut, usage, err := Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, true, mem, toolReg, append(opts, WithSystemPrompt(specPrompt))...)
 	if err != nil {
 		return "", nil, err
 	}
-	vr.FinalText = runOut
-	vr.Usage = usage
+
+	var rv runVerbose
+	if json.Unmarshal([]byte(runOut), &rv) == nil {
+		resp.FinalText = rv.FinalText
+		resp.Usage = rv.Usage
+		if rv.ToolRequested != "" {
+			resp.Tools = []ToolInfo{{
+				ToolRequested: rv.ToolRequested,
+				ToolArgs:      rv.ToolArgs,
+				ToolOutput:    rv.ToolOutput,
+			}}
+		}
+	} else {
+		resp.FinalText = runOut
+		resp.Usage = usage
+	}
 
 	if verbose {
-		var rv runVerbose
-		if json.Unmarshal([]byte(runOut), &rv) == nil {
-			if rv.FinalText != "" {
-				vr.FinalText = rv.FinalText
-			}
-			if rv.ToolRequested != "" {
-				vr.ToolRequested = rv.ToolRequested
-				vr.ToolArgs = rv.ToolArgs
-				vr.ToolOutput = rv.ToolOutput
-			}
-			if rv.Usage != nil {
-				vr.Usage = rv.Usage
-			}
-		}
-		return vr.JSON(), vr.Usage, nil
+		return resp.JSON(), resp.Usage, nil
 	}
-	return runOut, usage, nil
-}
-
-type routeVerbose struct {
-	RouterEnabled bool          `json:"router_enabled"`
-	BasePrompt    string        `json:"base_prompt"`
-	UserMessage   string        `json:"user_message"`
-	SessionID     string        `json:"session_id"`
-	Candidates    []string      `json:"candidates,omitempty"`
-	RouterError   string        `json:"router_error,omitempty"`
-	ChosenPrompt  string        `json:"chosen_prompt,omitempty"`
-	ToolRequested string        `json:"tool_requested,omitempty"`
-	ToolArgs      []string      `json:"tool_args,omitempty"`
-	ToolOutput    string        `json:"tool_output,omitempty"`
-	Usage         *openai.Usage `json:"usage,omitempty"`
-	FinalText     string        `json:"final_text"`
-}
-
-func (r routeVerbose) JSON() string {
-	js, _ := json.MarshalIndent(r, "", "  ")
-	return string(js)
+	return resp.FinalText, resp.Usage, nil
 }
 
 func listPromptCandidates(dir string) ([]string, error) {

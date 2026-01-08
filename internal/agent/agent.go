@@ -195,63 +195,77 @@ func Run(
 	if hasTool {
 		parts := strings.Fields(toolLine)
 		if len(parts) >= 1 {
-			toolName := strings.TrimPrefix(parts[0], "TOOL:")
-			args := parts[1:]
+			var toolName string
+			var args []string
+
+			// Handle "TOOL:toolname" vs "TOOL: toolname"
+			if parts[0] == "TOOL:" {
+				if len(parts) >= 2 {
+					toolName = parts[1]
+					args = parts[2:]
+				}
+			} else {
+				toolName = strings.TrimPrefix(parts[0], "TOOL:")
+				args = parts[1:]
+			}
+
 			rv.ToolRequested = toolName
 			rv.ToolArgs = args
 
-			if tc := toolReg.Get(toolName); tc != nil {
-				var toolOut string
+			if toolName != "" {
+				if tc := toolReg.Get(toolName); tc != nil {
+					var toolOut string
 
-				switch tc.Type {
-				case "postgres":
-					anyArgs := make([]any, len(args))
-					for i, v := range args {
-						anyArgs[i] = v
+					switch tc.Type {
+					case "postgres":
+						anyArgs := make([]any, len(args))
+						for i, v := range args {
+							anyArgs[i] = v
+						}
+						toolOut, err = tools.ExecPostgres(ctx, *tc, anyArgs...)
+
+					case "postgres_embedding":
+						var query string
+						if len(args) == 0 {
+							query = userMessage
+						} else {
+							query = strings.Join(args, " ")
+						}
+						toolOut, err = tools.ExecPostgresEmbedding(ctx, cli, *tc, query)
+
+					case "script":
+						toolOut, err = tools.ExecScript(*tc, args...)
+
+					default:
+						toolOut = "Tool type não suportado ainda"
 					}
-					toolOut, err = tools.ExecPostgres(ctx, *tc, anyArgs...)
 
-				case "postgres_embedding":
-					var query string
-					if len(args) == 0 {
-						query = userMessage
-					} else {
-						query = strings.Join(args, " ")
+					if err != nil {
+						toolOut = "Erro ao executar tool " + toolName + ": " + err.Error()
 					}
-					toolOut, err = tools.ExecPostgresEmbedding(ctx, cli, *tc, query)
+					rv.ToolOutput = toolOut
 
-				case "script":
-					toolOut, err = tools.ExecScript(*tc, args...)
+					b2 := newBuilder()
+					WithCachedContext(longPrompt)(b2)
+					if memBlock != "" {
+						WithSystemPrompt(memBlock)(b2)
+					}
+					for _, opt := range opts {
+						opt(b2)
+					}
+					WithSystemPrompt("O resultado da tool '" + toolName + "' foi:\n" + toolOut + "\nVocê DEVE usar essa informação para responder o usuário.")(b2)
+					b2.user = openai.ContentItem{Type: "text", Text: userMessage}
 
-				default:
-					toolOut = "Tool type não suportado ainda"
+					req2 := b2.req(model)
+					resp, err = cli.Respond(ctx, req2)
+					if err != nil {
+						return "", nil, err
+					}
+					rv.FinalText = resp.OutputText
+					rv.Usage = &resp.Usage
+				} else {
+					rv.ToolOutput = "Tool não encontrada: " + toolName
 				}
-
-				if err != nil {
-					toolOut = "Erro ao executar tool " + toolName + ": " + err.Error()
-				}
-				rv.ToolOutput = toolOut
-
-				b2 := newBuilder()
-				WithCachedContext(longPrompt)(b2)
-				if memBlock != "" {
-					WithSystemPrompt(memBlock)(b2)
-				}
-				for _, opt := range opts {
-					opt(b2)
-				}
-				WithSystemPrompt("O resultado da tool '" + toolName + "' foi:\n" + toolOut + "\nVocê DEVE usar essa informação para responder o usuário.")(b2)
-				b2.user = openai.ContentItem{Type: "text", Text: userMessage}
-
-				req2 := b2.req(model)
-				resp, err = cli.Respond(ctx, req2)
-				if err != nil {
-					return "", nil, err
-				}
-				rv.FinalText = resp.OutputText
-				rv.Usage = &resp.Usage
-			} else {
-				rv.ToolOutput = "Tool não encontrada: " + toolName
 			}
 		}
 	}
