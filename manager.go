@@ -4,24 +4,19 @@ import (
 	"context"
 	"fmt"
 	"sync"
-
-
 )
 
-// AgentManager gerencia múltiplos agentes simultaneamente.
 type AgentManager struct {
 	mu     sync.RWMutex
 	agents map[string]*Agent
 }
 
-// NewAgentManager cria um novo gerenciador de agentes.
 func NewAgentManager() *AgentManager {
 	return &AgentManager{
 		agents: make(map[string]*Agent),
 	}
 }
 
-// Register registra um novo agente com a configuração fornecida.
 func (m *AgentManager) Register(cfg *Config) (*Agent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -43,7 +38,6 @@ func (m *AgentManager) Register(cfg *Config) (*Agent, error) {
 	return agent, nil
 }
 
-// Get retorna um agente por nome.
 func (m *AgentManager) Get(name string) (*Agent, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -54,7 +48,6 @@ func (m *AgentManager) Get(name string) (*Agent, error) {
 	return agent, nil
 }
 
-// GetOrCreate obtém um agente existente ou cria um novo.
 func (m *AgentManager) GetOrCreate(cfg *Config) (*Agent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,7 +65,6 @@ func (m *AgentManager) GetOrCreate(cfg *Config) (*Agent, error) {
 	return agent, nil
 }
 
-// Remove remove e fecha um agente.
 func (m *AgentManager) Remove(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -90,7 +82,6 @@ func (m *AgentManager) Remove(name string) error {
 	return nil
 }
 
-// List retorna todos os nomes de agentes registrados.
 func (m *AgentManager) List() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -102,7 +93,6 @@ func (m *AgentManager) List() []string {
 	return names
 }
 
-// Close fecha todos os agentes.
 func (m *AgentManager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -121,7 +111,6 @@ func (m *AgentManager) Close() error {
 	return nil
 }
 
-// Chat envia uma mensagem para um agente específico.
 func (m *AgentManager) Chat(agentName, sessionID, message string) (string, error) {
 	agent, err := m.Get(agentName)
 	if err != nil {
@@ -130,7 +119,6 @@ func (m *AgentManager) Chat(agentName, sessionID, message string) (string, error
 	return agent.Chat(context.Background(), sessionID, message)
 }
 
-// ChatCtx envia uma mensagem para um agente específico com contexto.
 func (m *AgentManager) ChatCtx(ctx context.Context, agentName, sessionID, message string) (string, error) {
 	agent, err := m.Get(agentName)
 	if err != nil {
@@ -139,7 +127,6 @@ func (m *AgentManager) ChatCtx(ctx context.Context, agentName, sessionID, messag
 	return agent.Chat(ctx, sessionID, message)
 }
 
-// Count retorna o número de agentes registrados.
 func (m *AgentManager) Count() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

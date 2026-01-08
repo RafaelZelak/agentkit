@@ -91,7 +91,6 @@ func extractToolCommand(s string) (string, bool) {
 		return s, true
 	}
 
-	// caso comum: bloco markdown com linhas
 	for _, ln := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(ln)
 		t = strings.Trim(t, "`")

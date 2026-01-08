@@ -96,7 +96,7 @@ func ExecPostgresEmbedding(ctx context.Context, cli *openai.Client, cfg ToolConf
 	}
 
 	if len(results) == 0 {
-		return "Nenhum resultado encontrado.", nil
+		return "No results found.", nil
 	}
 
 	return strings.Join(results, "\n---\n"), nil

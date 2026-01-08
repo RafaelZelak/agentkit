@@ -152,9 +152,7 @@ func RouteAndRun(
 
 	if verbose {
 		var rv runVerbose
-		// Se Run retornou JSON, fazemos unmarshal para extrair dados
 		if json.Unmarshal([]byte(runOut), &rv) == nil {
-			// Mesclar dados de Run em vr
 			if rv.FinalText != "" {
 				vr.FinalText = rv.FinalText
 			}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -41,6 +42,12 @@ type ResponseEnvelope struct {
 
 const DefaultEmbeddingModel = "text-embedding-3-small"
 
+const (
+	defaultTimeout     = 60 * time.Second
+	defaultMaxAttempts = 3
+	retryBaseDelay     = 300 * time.Millisecond
+)
+
 type embeddingsRequest struct {
 	Model string   `json:"model"`
 	Input []string `json:"input"`
@@ -53,53 +60,70 @@ type embeddingsResponse struct {
 }
 
 type Client struct {
-	apiKey     string
-	httpClient *http.Client
+	apiKey         string
+	baseURL        string
+	chatPath       string
+	embeddingsPath string
+	httpClient     *http.Client
 }
 
 func NewClient(apiKey string) *Client {
 	return &Client{
-		apiKey: apiKey,
+		apiKey:         apiKey,
+		baseURL:        os.Getenv("OPENAI_BASE_URL"),
+		chatPath:       os.Getenv("OPENAI_CHAT_PATH"),
+		embeddingsPath: os.Getenv("OPENAI_EMBEDDINGS_PATH"),
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: defaultTimeout,
 		},
 	}
 }
 
+func (c *Client) validate() error {
+	if c.baseURL == "" || c.chatPath == "" || c.embeddingsPath == "" {
+		return fmt.Errorf("openai env vars not configured")
+	}
+	return nil
+}
+
 func (c *Client) Respond(ctx context.Context, req *ChatCompletionRequest) (*ResponseEnvelope, error) {
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+
 	body, _ := json.Marshal(req)
 
-	httpReq, _ := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(body))
+	url := c.baseURL + c.chatPath
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	var resp *http.Response
 	var err error
-	for i := 0; i < 3; i++ {
+
+	for attempt := 1; attempt <= defaultMaxAttempts; attempt++ {
 		resp, err = c.httpClient.Do(httpReq)
-		if err != nil {
-			if i == 2 {
-				return nil, err
-			}
-			time.Sleep(time.Duration(i+1) * 300 * time.Millisecond)
-			continue
+		if err == nil && resp.StatusCode < http.StatusInternalServerError {
+			break
 		}
-		if resp.StatusCode >= 500 {
-			if i == 2 {
-				break
-			}
+
+		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
-			time.Sleep(time.Duration(i+1) * 300 * time.Millisecond)
-			continue
 		}
-		break
+
+		if attempt == defaultMaxAttempts {
+			break
+		}
+
+		time.Sleep(time.Duration(attempt) * retryBaseDelay)
 	}
+
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= http.StatusBadRequest {
 		var errBody map[string]any
 		_ = json.NewDecoder(resp.Body).Decode(&errBody)
 		return nil, fmt.Errorf("openai error: %s\n%v", resp.Status, errBody)
@@ -112,8 +136,7 @@ func (c *Client) Respond(ctx context.Context, req *ChatCompletionRequest) (*Resp
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
-		Usage Usage          `json:"usage"`
-		Raw   map[string]any `json:"-"`
+		Usage Usage `json:"usage"`
 	}
 
 	var rawMap map[string]any
@@ -138,13 +161,18 @@ func (c *Client) Respond(ctx context.Context, req *ChatCompletionRequest) (*Resp
 }
 
 func (c *Client) Embed(ctx context.Context, model string, text string) ([]float32, error) {
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+
 	req := embeddingsRequest{
 		Model: model,
 		Input: []string{text},
 	}
 	body, _ := json.Marshal(req)
 
-	httpReq, _ := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/embeddings", bytes.NewBuffer(body))
+	url := c.baseURL + c.embeddingsPath
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
@@ -154,7 +182,7 @@ func (c *Client) Embed(ctx context.Context, model string, text string) ([]float3
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= http.StatusBadRequest {
 		var errBody map[string]any
 		_ = json.NewDecoder(resp.Body).Decode(&errBody)
 		return nil, fmt.Errorf("openai embeddings error: %s\n%v", resp.Status, errBody)

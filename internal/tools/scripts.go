@@ -23,7 +23,7 @@ func ExecScript(cfg ToolConfig, args ...string) (string, error) {
 
 	fn, ok := ScriptRegistry[fnName]
 	if !ok {
-		return "", fmt.Errorf("função '%s' não registrada no ScriptRegistry", fnName)
+		return "", fmt.Errorf("function '%s' not registered in ScriptRegistry", fnName)
 	}
 
 	return fn(args...)

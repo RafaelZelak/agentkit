@@ -9,40 +9,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config representa a configuração completa de um agente.
 type Config struct {
-	// Identificação
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
 
-	// Configuração de IA
 	APIKey       string `yaml:"api_key"`
 	GPTModel     string `yaml:"gpt_model"`
 	EmbModel     string `yaml:"embedding_model"`
 	EmbeddingDim int    `yaml:"embedding_dim"`
-	BaseURL      string `yaml:"base_url"` // Opcional: compatibilidade com outros providers
+	BaseURL      string `yaml:"base_url"`
 
-	// Banco de dados
 	DSN    string `yaml:"dsn"`
 	Schema string `yaml:"schema"`
 
-	// Caminhos (a mágica acontece aqui!)
-	PromptsDir   string `yaml:"prompts_dir"`   // Pasta base dos prompts
-	BasePrompt   string `yaml:"base_prompt"`   // Prompt principal
-	RouterPrompt string `yaml:"router_prompt"` // Router (opcional)
-	ToolsPath    string `yaml:"tools_path"`    // Config de tools
+	PromptsDir   string `yaml:"prompts_dir"`
+	BasePrompt   string `yaml:"base_prompt"`
+	RouterPrompt string `yaml:"router_prompt"`
+	ToolsPath    string `yaml:"tools_path"`
 
-	// Configurações extras
 	Timeout time.Duration `yaml:"timeout"`
 	Verbose bool          `yaml:"verbose"`
 }
 
-// MultiConfig representa múltiplas configurações de agentes.
 type MultiConfig struct {
 	Agents []Config `yaml:"agents"`
 }
 
-// resolveEnvVars resolve variáveis de ambiente no formato ${VAR_NAME} em uma string.
 func resolveEnvVars(s string) string {
 	if !strings.Contains(s, "${") {
 		return s
@@ -65,7 +57,6 @@ func resolveEnvVars(s string) string {
 	return result
 }
 
-// resolveConfigEnvVars resolve variáveis de ambiente em todos os campos de Config.
 func resolveConfigEnvVars(cfg *Config) {
 	cfg.APIKey = resolveEnvVars(cfg.APIKey)
 	cfg.DSN = resolveEnvVars(cfg.DSN)
@@ -79,7 +70,6 @@ func resolveConfigEnvVars(cfg *Config) {
 	cfg.ToolsPath = resolveEnvVars(cfg.ToolsPath)
 }
 
-// NewConfigFromYAML carrega configurações de múltiplos agentes de um arquivo YAML.
 func NewConfigFromYAML(path string) (*MultiConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -91,11 +81,9 @@ func NewConfigFromYAML(path string) (*MultiConfig, error) {
 		return nil, err
 	}
 
-	// Resolver variáveis de ambiente
 	for i := range cfg.Agents {
 		resolveConfigEnvVars(&cfg.Agents[i])
 
-		// Defaults
 		if cfg.Agents[i].Timeout == 0 {
 			cfg.Agents[i].Timeout = 60 * time.Second
 		}
@@ -110,7 +98,6 @@ func NewConfigFromYAML(path string) (*MultiConfig, error) {
 	return &cfg, nil
 }
 
-// LoadAgents carrega todos os agentes de um arquivo YAML e retorna um AgentManager.
 func LoadAgents(path string) (*AgentManager, error) {
 	cfg, err := NewConfigFromYAML(path)
 	if err != nil {
@@ -119,9 +106,9 @@ func LoadAgents(path string) (*AgentManager, error) {
 
 	manager := NewAgentManager()
 	for _, agentCfg := range cfg.Agents {
-		cfgCopy := agentCfg // Evitar closure sobre variável de loop
+		cfgCopy := agentCfg
 		if _, err := manager.Register(&cfgCopy); err != nil {
-			manager.Close() // Limpar agentes já criados
+			manager.Close()
 			return nil, err
 		}
 	}
@@ -129,13 +116,11 @@ func LoadAgents(path string) (*AgentManager, error) {
 	return manager, nil
 }
 
-// NewConfigFromEnv cria uma configuração a partir de variáveis de ambiente.
-// Mantido para retrocompatibilidade com uso de agente único.
 func NewConfigFromEnv() (*Config, error) {
 	embDimStr := os.Getenv("EMBEDDING_DIM")
 	embDim, err := strconv.Atoi(embDimStr)
 	if err != nil || embDim <= 0 {
-		embDim = 1536 // Default
+		embDim = 1536
 	}
 
 	timeoutStr := os.Getenv("AGENT_TIMEOUT")
