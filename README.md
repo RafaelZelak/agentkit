@@ -248,3 +248,34 @@ Ao definir `verbose: true` no `agents.yml`, o método `Chat` retornará uma stri
 ```
 
 Se `verbose: false`, o retorno será apenas a string: `"O valor atualizado com juros é R$ 1.200,00."`
+
+---
+
+## Prompts e Tools (Guia de Engenharia de Prompt)
+
+Para garantir que a LLM execute as tools corretamente, especialmente quando há informações em memória, é crucial ser explícito em seus prompts.
+
+### Regras de Ouro:
+
+1.  **Forçe a Execução**: Use imperativos como "Você DEVE executar a tool" ou "É OBRIGATÓRIO consultar".
+2.  **Desconfie da Memória**: Instrua o modelo a não confiar cegamente em dados antigos se a pergunta for sobre o estado _atual_.
+3.  **Condicionais Claras**: Defina exatamente _quando_ a tool deve ser chamada.
+
+### Exemplo (Ruim vs Bom):
+
+**Ruim (Ambíguo):**
+
+> "Se o usuário perguntar de boletos, veja se tem algum."
+> _(A LLM pode achar que "ver se tem algum" significa olhar no histórico do chat)_
+
+**Bom (Explícito):**
+
+> "Se o usuário perguntar sobre boletos, você **DEVE** executar a tool `search_boletos`. Não responda com base no histórico, busque sempre o dado atualizado."
+
+### Snippet Recomendado para seus Prompts:
+
+Adicione isso ao final das instruções de suas tools no arquivo `.md`:
+
+```markdown
+> IMPORTANTE: Mesmo que você tenha informações sobre esse assunto na memória ou contexto anterior, se o usuário perguntar o status atual ou solicitar uma nova verificação, você **DEVE** executar a tool novamente para buscar a informação mais recente. Não assuma que o estado anterior ainda é válido.
+```

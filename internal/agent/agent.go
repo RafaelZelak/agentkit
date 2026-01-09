@@ -54,7 +54,7 @@ func buildMemBlock(recent, similar []memory.HistoryItem, boleto map[string]strin
 
 	if len(boleto) > 0 {
 		sb.WriteString("== Estado estruturado (faturas) ==\n")
-		sb.WriteString("Use estes fatos como verdade a menos que o usuário informe atualização.\n")
+		sb.WriteString("Estes são estados conhecidos anteriormente. Se o usuário perguntar sobre o status atual, você DEVE consultar a tool novamente para garantir dados atualizados.\n")
 		for id, st := range boleto {
 			sb.WriteString("- Fatura ")
 			sb.WriteString(id)
