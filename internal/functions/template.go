@@ -7,17 +7,12 @@ import (
 	"strings"
 )
 
-// ProcessTemplate processes a template string, replacing {{ function.name }} or {{ function.name(args) }} 
-// with the result of executing the function
 func ProcessTemplate(template string) (string, error) {
 	result, _, err := ProcessTemplateWithTracking(template)
 	return result, err
 }
 
-// ProcessTemplateWithTracking processes a template and returns the result along with a map of executed functions
-// The map key is the original template (e.g., "{{ time.now }}") and the value is the result
 func ProcessTemplateWithTracking(template string) (string, map[string]string, error) {
-	// Pattern to match {{ ... }} including nested braces
 	pattern := regexp.MustCompile(`\{\{([^}]+)\}\}`)
 	
 	var result strings.Builder
@@ -30,19 +25,14 @@ func ProcessTemplateWithTracking(template string) (string, map[string]string, er
 	}
 	
 	for _, match := range matches {
-		// Add text before the match
 		result.WriteString(template[lastIndex:match[0]])
 		
-		// Extract the full template including braces (e.g., "{{ time.now }}")
 		fullTemplate := template[match[0]:match[1]]
 		
-		// Extract content inside {{ }}
 		content := strings.TrimSpace(template[match[2]:match[3]])
 		
-		// Process the function call
 		replacement, err := processFunctionCall(content)
 		if err != nil {
-			// On error, keep the original template or show error message
 			errorMsg := fmt.Sprintf("{{ ERROR: %s }}", err.Error())
 			result.WriteString(errorMsg)
 			functionsUsed[fullTemplate] = errorMsg
@@ -54,22 +44,18 @@ func ProcessTemplateWithTracking(template string) (string, map[string]string, er
 		lastIndex = match[1]
 	}
 	
-	// Add remaining text
 	result.WriteString(template[lastIndex:])
 	
 	return result.String(), functionsUsed, nil
 }
 
-// processFunctionCall parses and executes a function call like "time.now" or "time.greeting(\"user\")"
 func processFunctionCall(content string) (string, error) {
 	content = strings.TrimSpace(content)
 	
-	// Check if it has parentheses (function with arguments)
 	if strings.Contains(content, "(") {
 		return processFunctionWithArgs(content)
 	}
 	
-	// Function without arguments
 	fn := Get(content)
 	if fn == nil {
 		return "", fmt.Errorf("function '%s' not found", content)
@@ -83,9 +69,7 @@ func processFunctionCall(content string) (string, error) {
 	return result, nil
 }
 
-// processFunctionWithArgs parses a function call with arguments like "time.greeting(\"user\")"
 func processFunctionWithArgs(content string) (string, error) {
-	// Find the opening parenthesis
 	openParen := strings.Index(content, "(")
 	if openParen == -1 {
 		return "", fmt.Errorf("invalid function call syntax: missing opening parenthesis")
@@ -93,7 +77,6 @@ func processFunctionWithArgs(content string) (string, error) {
 	
 	functionName := strings.TrimSpace(content[:openParen])
 	
-	// Find the closing parenthesis
 	closeParen := strings.LastIndex(content, ")")
 	if closeParen == -1 || closeParen <= openParen {
 		return "", fmt.Errorf("invalid function call syntax: missing closing parenthesis")
@@ -101,13 +84,11 @@ func processFunctionWithArgs(content string) (string, error) {
 	
 	argsStr := strings.TrimSpace(content[openParen+1 : closeParen])
 	
-	// Parse arguments
 	args, err := parseArguments(argsStr)
 	if err != nil {
 		return "", fmt.Errorf("error parsing arguments: %w", err)
 	}
 	
-	// Get and call the function
 	fn := Get(functionName)
 	if fn == nil {
 		return "", fmt.Errorf("function '%s' not found", functionName)
@@ -121,8 +102,6 @@ func processFunctionWithArgs(content string) (string, error) {
 	return result, nil
 }
 
-// parseArguments parses a comma-separated list of arguments
-// Supports strings (with quotes), integers, and floats
 func parseArguments(argsStr string) ([]interface{}, error) {
 	if argsStr == "" {
 		return []interface{}{}, nil
@@ -172,7 +151,6 @@ func parseArguments(argsStr string) ([]interface{}, error) {
 				inString = true
 				stringQuote = char
 			} else if char == stringQuote {
-				// End of string - add the string value
 				args = append(args, current.String())
 				current.Reset()
 				inString = false
@@ -182,7 +160,6 @@ func parseArguments(argsStr string) ([]interface{}, error) {
 			}
 		case ',':
 			if !inString {
-				// End of current argument
 				argStr := strings.TrimSpace(current.String())
 				if argStr != "" {
 					parsed, err := parseValue(argStr)
@@ -200,7 +177,6 @@ func parseArguments(argsStr string) ([]interface{}, error) {
 		}
 	}
 	
-	// Handle last argument if no trailing comma
 	if !inString {
 		argStr := strings.TrimSpace(current.String())
 		if argStr != "" {
@@ -217,20 +193,16 @@ func parseArguments(argsStr string) ([]interface{}, error) {
 	return args, nil
 }
 
-// parseValue parses a single value (string, int, or float)
 func parseValue(s string) (interface{}, error) {
 	s = strings.TrimSpace(s)
 	
-	// Try integer
 	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
 		return int(i), nil
 	}
 	
-	// Try float
 	if f, err := strconv.ParseFloat(s, 64); err == nil {
 		return f, nil
 	}
 	
-	// Return as string
 	return s, nil
 }

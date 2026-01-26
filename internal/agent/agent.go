@@ -134,10 +134,8 @@ func Run(
 	}
 	longPromptRaw := string(promptBytes)
 	
-	// Process template functions in the prompt
 	longPrompt, baseFunctions, err := functions.ProcessTemplateWithTracking(longPromptRaw)
 	if err != nil {
-		// Log error but continue with original prompt
 		longPrompt = longPromptRaw
 		baseFunctions = make(map[string]string)
 	}
@@ -186,7 +184,6 @@ func Run(
 	memBlock := buildMemBlock(recent, similar, faturas)
 
 	b := newBuilder()
-	// Merge base prompt functions into builder's tracking
 	for k, v := range baseFunctions {
 		b.functionsUsed[k] = v
 	}
@@ -210,7 +207,6 @@ func Run(
 
 	toolLine, hasTool := extractToolCommand(originalOut)
 
-	// Convert map to slice of FunctionCall
 	functionsList := make([]FunctionCall, 0, len(b.functionsUsed))
 	for template, result := range b.functionsUsed {
 		functionsList = append(functionsList, FunctionCall{
@@ -225,7 +221,6 @@ func Run(
 		Functions: functionsList,
 	}
 	
-	// Only include functions in verbose mode if there are any
 	if len(rv.Functions) == 0 {
 		rv.Functions = nil
 	}
@@ -236,7 +231,6 @@ func Run(
 			var toolName string
 			var args []string
 
-			// Handle "TOOL:toolname" vs "TOOL: toolname"
 			if parts[0] == "TOOL:" {
 				if len(parts) >= 2 {
 					toolName = parts[1]
@@ -284,7 +278,6 @@ func Run(
 					rv.ToolOutput = toolOut
 
 					b2 := newBuilder()
-					// Merge base prompt functions into builder's tracking
 					for k, v := range baseFunctions {
 						b2.functionsUsed[k] = v
 					}
@@ -298,7 +291,6 @@ func Run(
 					WithSystemPrompt("O resultado da tool '" + toolName + "' foi:\n" + toolOut + "\nVocê DEVE usar essa informação para responder o usuário.")(b2)
 					b2.user = openai.ContentItem{Type: "text", Text: userMessage}
 					
-					// Update functions tracking from b2 - merge into existing map
 					for k, v := range b2.functionsUsed {
 						b.functionsUsed[k] = v
 					}
@@ -309,7 +301,6 @@ func Run(
 						return "", nil, err
 					}
 					
-					// Convert updated map to slice of FunctionCall
 					functionsList = make([]FunctionCall, 0, len(b.functionsUsed))
 					for template, result := range b.functionsUsed {
 						functionsList = append(functionsList, FunctionCall{
