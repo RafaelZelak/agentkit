@@ -27,3 +27,4 @@ scripts/
 cmd/main.go
 suporte.yml
 agents.yml
+funcs/
