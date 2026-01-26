@@ -22,11 +22,9 @@ type Agent struct {
 }
 
 func NewAgent(cfg *Config) (*Agent, error) {
-	// Validate functions_path if provided (optional)
 	if cfg.FunctionsPath != "" {
 		funcsPath := cfg.FunctionsPath
 		if !filepath.IsAbs(funcsPath) {
-			// If relative path, make it relative to current working directory
 			wd, err := os.Getwd()
 			if err != nil {
 				return nil, fmt.Errorf("failed to get working directory: %w", err)
