@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RafaelZelak/agentkit/internal/functions"
 	"github.com/RafaelZelak/agentkit/internal/memory"
 	"github.com/RafaelZelak/agentkit/internal/openai"
 	"github.com/RafaelZelak/agentkit/internal/tools"
@@ -16,10 +17,16 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type FunctionCall struct {
+	Template string `json:"template"`
+	Result   string `json:"result"`
+}
+
 type runVerbose struct {
 	ToolRequested string        `json:"tool_requested,omitempty"`
 	ToolArgs      []string      `json:"tool_args,omitempty"`
 	ToolOutput    string        `json:"tool_output,omitempty"`
+	Functions     []FunctionCall `json:"functions,omitempty"`
 	Usage         *openai.Usage `json:"usage,omitempty"`
 	FinalText     string        `json:"final_text"`
 }
@@ -125,7 +132,15 @@ func Run(
 	if err != nil {
 		return "", nil, fmt.Errorf("read prompt: %w", err)
 	}
-	longPrompt := string(promptBytes)
+	longPromptRaw := string(promptBytes)
+	
+	// Process template functions in the prompt
+	longPrompt, baseFunctions, err := functions.ProcessTemplateWithTracking(longPromptRaw)
+	if err != nil {
+		// Log error but continue with original prompt
+		longPrompt = longPromptRaw
+		baseFunctions = make(map[string]string)
+	}
 
 	semTopK := envInt("MEM_SEM_TOPK", 5)
 	memDepth := envInt("MEM_DEPTH", 4)
@@ -171,6 +186,11 @@ func Run(
 	memBlock := buildMemBlock(recent, similar, faturas)
 
 	b := newBuilder()
+	// Merge base prompt functions into builder's tracking
+	for k, v := range baseFunctions {
+		b.functionsUsed[k] = v
+	}
+	
 	WithCachedContext(longPrompt)(b)
 	if memBlock != "" {
 		WithSystemPrompt(memBlock)(b)
@@ -190,7 +210,25 @@ func Run(
 
 	toolLine, hasTool := extractToolCommand(originalOut)
 
-	rv := runVerbose{FinalText: originalOut, Usage: &resp.Usage}
+	// Convert map to slice of FunctionCall
+	functionsList := make([]FunctionCall, 0, len(b.functionsUsed))
+	for template, result := range b.functionsUsed {
+		functionsList = append(functionsList, FunctionCall{
+			Template: template,
+			Result:   result,
+		})
+	}
+	
+	rv := runVerbose{
+		FinalText: originalOut,
+		Usage:     &resp.Usage,
+		Functions: functionsList,
+	}
+	
+	// Only include functions in verbose mode if there are any
+	if len(rv.Functions) == 0 {
+		rv.Functions = nil
+	}
 
 	if hasTool {
 		parts := strings.Fields(toolLine)
@@ -246,6 +284,10 @@ func Run(
 					rv.ToolOutput = toolOut
 
 					b2 := newBuilder()
+					// Merge base prompt functions into builder's tracking
+					for k, v := range baseFunctions {
+						b2.functionsUsed[k] = v
+					}
 					WithCachedContext(longPrompt)(b2)
 					if memBlock != "" {
 						WithSystemPrompt(memBlock)(b2)
@@ -255,14 +297,33 @@ func Run(
 					}
 					WithSystemPrompt("O resultado da tool '" + toolName + "' foi:\n" + toolOut + "\nVocê DEVE usar essa informação para responder o usuário.")(b2)
 					b2.user = openai.ContentItem{Type: "text", Text: userMessage}
+					
+					// Update functions tracking from b2 - merge into existing map
+					for k, v := range b2.functionsUsed {
+						b.functionsUsed[k] = v
+					}
 
 					req2 := b2.req(model)
 					resp, err = cli.Respond(ctx, req2)
 					if err != nil {
 						return "", nil, err
 					}
+					
+					// Convert updated map to slice of FunctionCall
+					functionsList = make([]FunctionCall, 0, len(b.functionsUsed))
+					for template, result := range b.functionsUsed {
+						functionsList = append(functionsList, FunctionCall{
+							Template: template,
+							Result:   result,
+						})
+					}
+					
 					rv.FinalText = resp.OutputText
 					rv.Usage = &resp.Usage
+					rv.Functions = functionsList
+					if len(rv.Functions) == 0 {
+						rv.Functions = nil
+					}
 				} else {
 					rv.ToolOutput = "Tool não encontrada: " + toolName
 				}

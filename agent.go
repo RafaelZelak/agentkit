@@ -2,6 +2,9 @@ package agentkit
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/RafaelZelak/agentkit/internal/agent"
 	"github.com/RafaelZelak/agentkit/internal/memory"
@@ -19,6 +22,30 @@ type Agent struct {
 }
 
 func NewAgent(cfg *Config) (*Agent, error) {
+	// Validate functions_path if provided (optional)
+	if cfg.FunctionsPath != "" {
+		funcsPath := cfg.FunctionsPath
+		if !filepath.IsAbs(funcsPath) {
+			// If relative path, make it relative to current working directory
+			wd, err := os.Getwd()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get working directory: %w", err)
+			}
+			funcsPath = filepath.Join(wd, funcsPath)
+		}
+		
+		info, err := os.Stat(funcsPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("functions_path '%s' does not exist for agent '%s'", cfg.FunctionsPath, cfg.Name)
+			}
+			return nil, fmt.Errorf("failed to check functions_path '%s': %w", cfg.FunctionsPath, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("functions_path '%s' is not a directory for agent '%s'", cfg.FunctionsPath, cfg.Name)
+		}
+	}
+
 	var toolReg *tools.Registry
 	var err error
 	if cfg.ToolsPath != "" {

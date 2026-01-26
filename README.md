@@ -35,8 +35,10 @@ my-project/
 │   │   └── router.md
 │   └── vendas/
 │       └── base.md
-└── tools/              # Diretório de configuração de ferramentas
-    └── suporte.yml
+├── tools/              # Diretório de configuração de ferramentas
+│   └── suporte.yml
+└── funcs/              # (Opcional) Diretório de funções Go para templates
+    └── time.go
 ```
 
 ### 2. Configuração (`agents.yml`)
@@ -63,8 +65,11 @@ agents:
     base_prompt: prompts/suporte/base.md # Prompt principal
     router_prompt: prompts/suporte/router.md # (Opcional) Ativa o Roteamento Inteligente
 
-    # Ferramentas
+    # Ferramentas (Opcional)
     tools_path: tools/suporte.yml # Arquivo de definição das tools
+
+    # Functions (Opcional)
+    functions_path: funcs/ # Diretório onde as funções Go estão (para validação)
 
     # Configurações Extras
     timeout: 60s # Timeout global para respostas
@@ -83,6 +88,10 @@ import (
 
     // Importe seus scripts customizados para que o init() deles seja executado
     _ "my-project/scripts"
+    
+    // Importe suas funções customizadas para que o init() deles seja executado
+    // Isso é necessário para registrar as funções no sistema
+    _ "my-project/funcs"
 )
 
 func main() {
@@ -205,6 +214,292 @@ func CalcularJuros(args ...string) (string, error) {
 
 ---
 
+## Funções em Prompts (Functions)
+
+O AgentKit permite que você execute funções Go diretamente dentro dos seus arquivos de prompt usando sintaxe de template. Diferente das **Tools** (que são executadas pela LLM durante a conversa), as **Functions** são executadas **antes** do prompt ser enviado para a OpenAI, substituindo os templates pelos resultados em tempo real.
+
+**Diferença chave:**
+- **Tools**: Executadas pela LLM durante a conversa (`TOOL:nome_tool args`)
+- **Functions**: Executadas automaticamente ao processar o prompt (`{{ function.name }}`)
+
+### Quando Usar Functions?
+
+Functions são ideais para:
+- **Informações dinâmicas**: Horário atual, data, ambiente (dev/prod)
+- **Transformações simples**: Formatação de texto, cálculos rápidos
+- **Valores contextuais**: Nome do usuário, configurações do sistema
+- **Personalização**: Saudações baseadas em hora, mensagens condicionais
+
+### 1. Configuração no `agents.yml` (Opcional)
+
+Assim como `tools_path`, o `functions_path` é **opcional**. Ele serve apenas para validação - o sistema verifica se o diretório existe ao criar o agente.
+
+```yaml
+agents:
+  - name: suporte
+    # ... outras configurações ...
+    
+    # Functions (Opcional)
+    functions_path: funcs/ # Diretório onde suas funções Go estão
+```
+
+**Importante:** Mesmo que você não defina `functions_path`, as funções ainda funcionarão se você importar o pacote no `main.go`. O `functions_path` é apenas uma validação de que o diretório existe.
+
+### 2. Criar Funções Go
+
+Crie um pacote (ex: `funcs/time.go`) com suas funções. Cada função deve retornar `string` ou `(string, error)`.
+
+```go
+package funcs
+
+import (
+    "fmt"
+    "time"
+    
+    "github.com/RafaelZelak/agentkit/sdk"
+)
+
+// init() é executado automaticamente quando o pacote é importado
+func init() {
+    // Registra a função "time.now" que pode ser chamada como {{ time.now }}
+    sdk.RegisterGoFunction("time.now", Now)
+    
+    // Registra a função "time.greeting" que aceita um argumento
+    sdk.RegisterGoFunction("time.greeting", Greeting)
+}
+
+// Now retorna uma saudação baseada no horário atual
+func Now() string {
+    hour := time.Now().Hour()
+    
+    if hour >= 6 && hour < 12 {
+        return "Bom Dia"
+    } else if hour >= 12 && hour < 18 {
+        return "Boa Tarde"
+    } else {
+        return "Boa Noite"
+    }
+}
+
+// Greeting retorna uma saudação personalizada
+// Parâmetros string podem ser opcionais (valor padrão: string vazia)
+func Greeting(name string) string {
+    greeting := Now()
+    if name == "" {
+        name = "usuário"
+    }
+    return fmt.Sprintf("%s, %s", greeting, name)
+}
+```
+
+### 3. Registrar Funções com `RegisterGoFunction`
+
+O `sdk.RegisterGoFunction` aceita dois parâmetros:
+
+1. **Nome da função** (string): O nome que você usará no template, no formato `"pacote.funcao"` (ex: `"time.now"`, `"math.add"`)
+2. **Função Go**: A referência da função (sem parênteses)
+
+**Assinaturas suportadas:**
+- `func() string` - Sem argumentos
+- `func() (string, error)` - Sem argumentos, com tratamento de erro
+- `func(arg1 string) string` - Com argumentos
+- `func(arg1 string, arg2 int) string` - Múltiplos argumentos
+- `func(args ...interface{}) (string, error)` - Assinatura genérica
+
+**Argumentos opcionais:**
+Parâmetros do tipo `string` podem ser omitidos na chamada. Se não fornecidos, receberão o valor padrão (string vazia `""`).
+
+### 4. Importar no `main.go`
+
+**Crucial:** Você **deve** importar o pacote de funções no `main.go` para que o `init()` seja executado e as funções sejam registradas.
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "github.com/RafaelZelak/agentkit"
+    "github.com/joho/godotenv"
+
+    // Importe suas funções - o init() será executado automaticamente
+    _ "github.com/RafaelZelak/agentkit/funcs"
+    
+    // Importe seus scripts também (se houver)
+    _ "github.com/RafaelZelak/agentkit/scripts"
+)
+
+func main() {
+    _ = godotenv.Load()
+    
+    manager, err := agentkit.LoadAgents("agents.yml")
+    if err != nil {
+        log.Fatal("Erro ao carregar agentes:", err)
+    }
+    defer manager.Close()
+    
+    // ... resto do código
+}
+```
+
+**Por que o `_` antes do import?**
+O `_` indica um import "em branco" - você está importando o pacote apenas para executar o `init()`, não para usar diretamente no código.
+
+### 5. Usar nos Prompts
+
+Use a sintaxe `{{ function.name }}` ou `{{ function.name(args) }}` diretamente nos seus arquivos `.md`:
+
+**Exemplo (`prompts/suporte/suporte.md`):**
+
+```markdown
+Você é **Bia**, assistente virtual do Suporte.
+
+Quando o usuário cumprimentar, responda com {{ time.now }}
+
+Para personalizar: Olá {{ time.greeting("João") }}, como posso ajudar?
+```
+
+**Resultado processado antes de enviar para a OpenAI:**
+
+```markdown
+Você é **Bia**, assistente virtual do Suporte.
+
+Quando o usuário cumprimentar, responda com Bom Dia
+
+Para personalizar: Olá Bom Dia, João, como posso ajudar?
+```
+
+### 6. Sintaxe de Templates
+
+**Sem argumentos:**
+```markdown
+{{ time.now }}
+```
+
+**Com argumentos:**
+```markdown
+{{ time.greeting("usuário") }}
+{{ math.add(1, 2) }}
+{{ format.currency(100.50) }}
+```
+
+**Argumentos opcionais:**
+```markdown
+{{ time.greeting }}  # name receberá "" (string vazia)
+{{ time.greeting("João") }}  # name receberá "João"
+```
+
+**Tipos de argumentos suportados:**
+- Strings: `{{ func("texto") }}`
+- Inteiros: `{{ func(123) }}`
+- Floats: `{{ func(12.34) }}`
+
+### 7. Execução Dinâmica
+
+**Importante:** As funções são executadas **a cada vez** que o prompt é processado. Isso significa que:
+
+- `{{ time.now }}` retornará valores diferentes dependendo do horário
+- Funções que dependem de estado externo sempre terão dados atualizados
+- Não há cache - cada chamada é uma execução nova
+
+### 8. Verbose Mode e Functions
+
+Quando `verbose: true`, o JSON de resposta inclui um array `functions` mostrando todas as funções executadas:
+
+```json
+{
+  "final_text": "Bom Dia! Como posso ajudar?",
+  "usage": { ... },
+  "functions": [
+    {
+      "template": "{{ time.now }}",
+      "result": "Bom Dia"
+    },
+    {
+      "template": "{{ time.greeting(\"usuário\") }}",
+      "result": "Bom Dia, usuário"
+    }
+  ]
+}
+```
+
+Isso é útil para debug e para entender quais funções foram executadas e seus resultados.
+
+### 9. Exemplo Completo
+
+**Estrutura:**
+```
+my-project/
+├── funcs/
+│   └── time.go
+├── prompts/
+│   └── suporte/
+│       └── suporte.md
+├── agents.yml
+└── main.go
+```
+
+**`funcs/time.go`:**
+```go
+package funcs
+
+import (
+    "fmt"
+    "time"
+    "github.com/RafaelZelak/agentkit/sdk"
+)
+
+func init() {
+    sdk.RegisterGoFunction("time.now", Now)
+    sdk.RegisterGoFunction("time.greeting", Greeting)
+}
+
+func Now() string {
+    hour := time.Now().Hour()
+    if hour >= 6 && hour < 12 {
+        return "Bom Dia"
+    } else if hour >= 12 && hour < 18 {
+        return "Boa Tarde"
+    } else {
+        return "Boa Noite"
+    }
+}
+
+func Greeting(name string) string {
+    greeting := Now()
+    if name == "" {
+        name = "usuário"
+    }
+    return fmt.Sprintf("%s, %s", greeting, name)
+}
+```
+
+**`prompts/suporte/suporte.md`:**
+```markdown
+Você é **Bia**, assistente virtual.
+
+Sempre comece suas respostas com {{ time.now }}.
+```
+
+**`agents.yml`:**
+```yaml
+agents:
+  - name: suporte
+    # ... outras configs ...
+    functions_path: funcs/
+```
+
+**`main.go`:**
+```go
+import (
+    _ "github.com/RafaelZelak/agentkit/funcs"
+)
+```
+
+**Resultado:** A cada mensagem, o prompt será processado e `{{ time.now }}` será substituído pela saudação apropriada antes de ser enviado para a OpenAI.
+
+---
+
 ## Roteamento Inteligente (Router)
 
 O AgentKit possui um sistema nativo de roteamento de intenções. Isso permite que um único agente "mude de personalidade" ou utilize prompts especializados dependendo do que o usuário pede.
@@ -238,6 +533,12 @@ Ao definir `verbose: true` no `agents.yml`, o método `Chat` retornará uma stri
   "tool_requested": "calcular_juros",
   "tool_args": ["1000", "10"],
   "tool_output": "1200.00",
+  "functions": [
+    {
+      "template": "{{ time.now }}",
+      "result": "Bom Dia"
+    }
+  ],
   "usage": {
     "prompt_tokens": 500,
     "completion_tokens": 50,

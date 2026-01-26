@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RafaelZelak/agentkit/internal/functions"
 	"github.com/RafaelZelak/agentkit/internal/memory"
 	"github.com/RafaelZelak/agentkit/internal/openai"
 	"github.com/RafaelZelak/agentkit/internal/tools"
@@ -43,10 +44,11 @@ type ToolInfo struct {
 }
 
 type Response struct {
-	Prompt    PromptInfo    `json:"prompt"`
-	Tools     []ToolInfo    `json:"tools,omitempty"`
+	Prompt    PromptInfo     `json:"prompt"`
+	Tools     []ToolInfo     `json:"tools,omitempty"`
+	Functions []FunctionCall `json:"functions,omitempty"`
 	Usage     *openai.Usage `json:"usage,omitempty"`
-	FinalText string        `json:"final_text"`
+	FinalText string         `json:"final_text"`
 }
 
 func (r Response) JSON() string {
@@ -101,6 +103,9 @@ func RouteAndRun(
 					ToolOutput:    rv.ToolOutput,
 				}}
 			}
+			if len(rv.Functions) > 0 {
+				resp.Functions = rv.Functions
+			}
 		} else {
 			resp.FinalText = runOut
 			resp.Usage = usage
@@ -116,7 +121,14 @@ func RouteAndRun(
 	if err != nil {
 		return "", nil, fmt.Errorf("read router: %w", err)
 	}
-	routerPrompt := string(routerBytes)
+	routerPromptRaw := string(routerBytes)
+	
+	// Process template functions in the router prompt
+	routerPrompt, err := functions.ProcessTemplate(routerPromptRaw)
+	if err != nil {
+		// On error, use original prompt
+		routerPrompt = routerPromptRaw
+	}
 
 	dir := filepath.Dir(routerPath)
 	cands, err := listPromptCandidates(dir)
@@ -213,6 +225,9 @@ func RouteAndRun(
 				ToolArgs:      rv.ToolArgs,
 				ToolOutput:    rv.ToolOutput,
 			}}
+		}
+		if len(rv.Functions) > 0 {
+			resp.Functions = rv.Functions
 		}
 	} else {
 		resp.FinalText = runOut

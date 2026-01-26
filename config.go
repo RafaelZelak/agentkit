@@ -1,6 +1,7 @@
 package agentkit
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ type Config struct {
 	BasePrompt   string `yaml:"base_prompt"`
 	RouterPrompt string `yaml:"router_prompt"`
 	ToolsPath    string `yaml:"tools_path"`
+	FunctionsPath string `yaml:"functions_path"`
 
 	Timeout time.Duration `yaml:"timeout"`
 	Verbose bool          `yaml:"verbose"`
@@ -68,6 +70,7 @@ func resolveConfigEnvVars(cfg *Config) {
 	cfg.BasePrompt = resolveEnvVars(cfg.BasePrompt)
 	cfg.RouterPrompt = resolveEnvVars(cfg.RouterPrompt)
 	cfg.ToolsPath = resolveEnvVars(cfg.ToolsPath)
+	cfg.FunctionsPath = resolveEnvVars(cfg.FunctionsPath)
 }
 
 func NewConfigFromYAML(path string) (*MultiConfig, error) {
@@ -84,6 +87,32 @@ func NewConfigFromYAML(path string) (*MultiConfig, error) {
 	for i := range cfg.Agents {
 		resolveConfigEnvVars(&cfg.Agents[i])
 
+		agentName := cfg.Agents[i].Name
+		if agentName == "" {
+			return nil, fmt.Errorf("agent[%d]: name is required", i)
+		}
+
+		// Validate required fields
+		if cfg.Agents[i].APIKey == "" {
+			return nil, fmt.Errorf("agent '%s': api_key is required", agentName)
+		}
+		if cfg.Agents[i].GPTModel == "" {
+			return nil, fmt.Errorf("agent '%s': gpt_model is required", agentName)
+		}
+		if cfg.Agents[i].DSN == "" {
+			return nil, fmt.Errorf("agent '%s': dsn is required", agentName)
+		}
+		if cfg.Agents[i].Schema == "" {
+			return nil, fmt.Errorf("agent '%s': schema is required", agentName)
+		}
+		if cfg.Agents[i].PromptsDir == "" {
+			return nil, fmt.Errorf("agent '%s': prompts_dir is required", agentName)
+		}
+		if cfg.Agents[i].BasePrompt == "" {
+			return nil, fmt.Errorf("agent '%s': base_prompt is required", agentName)
+		}
+
+		// Set defaults for optional fields
 		if cfg.Agents[i].Timeout == 0 {
 			cfg.Agents[i].Timeout = 60 * time.Second
 		}
@@ -137,12 +166,13 @@ func NewConfigFromEnv() (*Config, error) {
 		EmbeddingDim: embDim,
 		GPTModel:     os.Getenv("GPT_MODEL"),
 		EmbModel:     os.Getenv("EMBEDDING_MODEL"),
-		ToolsPath:    os.Getenv("TOOLS_PATH"),
-		PromptsDir:   os.Getenv("PROMPTS_DIR"),
-		BasePrompt:   os.Getenv("BASE_PROMPT"),
-		RouterPrompt: os.Getenv("ROUTER_PROMPT"),
-		Timeout:      timeout,
-		Verbose:      os.Getenv("VERBOSE") == "true",
+		ToolsPath:     os.Getenv("TOOLS_PATH"),
+		FunctionsPath: os.Getenv("FUNCTIONS_PATH"),
+		PromptsDir:    os.Getenv("PROMPTS_DIR"),
+		BasePrompt:    os.Getenv("BASE_PROMPT"),
+		RouterPrompt:  os.Getenv("ROUTER_PROMPT"),
+		Timeout:       timeout,
+		Verbose:       os.Getenv("VERBOSE") == "true",
 	}
 
 	if cfg.Name == "" {

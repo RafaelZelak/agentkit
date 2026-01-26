@@ -6,11 +6,13 @@ type builder struct {
 	system         []openai.Message
 	user           openai.ContentItem
 	promptCacheKey string
+	functionsUsed  map[string]string
 }
 
 func newBuilder() *builder {
 	return &builder{
-		system: make([]openai.Message, 0, 6),
+		system:        make([]openai.Message, 0, 6),
+		functionsUsed: make(map[string]string),
 	}
 }
 
