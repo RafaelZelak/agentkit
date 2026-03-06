@@ -132,3 +132,36 @@ func (m *AgentManager) Count() int {
 	defer m.mu.RUnlock()
 	return len(m.agents)
 }
+
+func (m *AgentManager) Exists(name string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.agents[name]
+	return ok
+}
+
+func (m *AgentManager) RegisterOrReplace(cfg *Config) (*Agent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if existing, ok := m.agents[cfg.Name]; ok {
+		_ = existing.Close()
+		delete(m.agents, cfg.Name)
+	}
+
+	newAgent, err := NewAgent(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create agent '%s': %w", cfg.Name, err)
+	}
+
+	m.agents[cfg.Name] = newAgent
+	return newAgent, nil
+}
+
+func (m *AgentManager) ChatWithResponse(ctx context.Context, agentName, sessionID, message string) (*ChatResponse, error) {
+	foundAgent, err := m.Get(agentName)
+	if err != nil {
+		return nil, err
+	}
+	return foundAgent.ChatWithResponse(ctx, sessionID, message)
+}

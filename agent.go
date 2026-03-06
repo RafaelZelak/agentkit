@@ -31,7 +31,7 @@ func NewAgent(cfg *Config) (*Agent, error) {
 			}
 			funcsPath = filepath.Join(wd, funcsPath)
 		}
-		
+
 		info, err := os.Stat(funcsPath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -83,6 +83,46 @@ func (a *Agent) Chat(ctx context.Context, sessionID, message string) (string, er
 
 func (a *Agent) ChatSimple(ctx context.Context, sessionID, message string) (string, error) {
 	return a.Run(ctx, sessionID, a.cfg.BasePrompt, message)
+}
+
+func (a *Agent) ChatWithResponse(ctx context.Context, sessionID, message string) (*ChatResponse, error) {
+	var text string
+	var usage *openai.Usage
+	var err error
+
+	if a.cfg.RouterPrompt != "" {
+		text, usage, err = agent.RouteAndRun(
+			ctx,
+			a.cli,
+			a.cfg.GPTModel,
+			a.cfg.EmbModel,
+			sessionID,
+			a.cfg.BasePrompt,
+			message,
+			a.cfg.RouterPrompt,
+			a.verbose,
+			a.memory,
+			a.tools,
+		)
+	} else {
+		text, usage, err = agent.Run(
+			ctx,
+			a.cli,
+			a.cfg.GPTModel,
+			a.cfg.EmbModel,
+			sessionID,
+			a.cfg.BasePrompt,
+			message,
+			a.verbose,
+			a.memory,
+			a.tools,
+		)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return newChatResponse(text, usage), nil
 }
 
 func (a *Agent) Run(ctx context.Context, sessionID, basePromptPath, userMessage string) (string, error) {

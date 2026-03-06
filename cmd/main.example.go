@@ -10,7 +10,7 @@ import (
 	_ "github.com/RafaelZelak/agentkit/scripts"
 )
 
-func main() {
+func example() {
 	// Load .env file
 	_ = godotenv.Load()
 
