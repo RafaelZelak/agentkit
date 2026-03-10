@@ -23,12 +23,33 @@ type FunctionCall struct {
 }
 
 type runVerbose struct {
-	ToolRequested string        `json:"tool_requested,omitempty"`
-	ToolArgs      []string      `json:"tool_args,omitempty"`
-	ToolOutput    string        `json:"tool_output,omitempty"`
+	ToolRequested string         `json:"tool_requested,omitempty"`
+	ToolArgs      []string       `json:"tool_args,omitempty"`
+	ToolOutput    string         `json:"tool_output,omitempty"`
 	Functions     []FunctionCall `json:"functions,omitempty"`
-	Usage         *openai.Usage `json:"usage,omitempty"`
-	FinalText     string        `json:"final_text"`
+	Usage         *openai.Usage  `json:"usage,omitempty"`
+	FinalText     string         `json:"final_text"`
+}
+
+// loadPrompt given a path and a memory store checks if the path has a "db:" prefix
+// - If it has, it queries the DB
+// - If it doesn't, loads the prompt file via standard IO ReadFile
+func loadPrompt(ctx context.Context, mem *memory.Store, path string) (string, error) {
+	if strings.HasPrefix(path, "db:") {
+		query := strings.TrimSpace(strings.TrimPrefix(path, "db:"))
+		var content string
+		err := mem.QueryRow(ctx, query).Scan(&content)
+		if err != nil {
+			return "", fmt.Errorf("failed to load prompt from db query '%s': %w", query, err)
+		}
+		return content, nil
+	}
+
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read prompt file '%s': %w", path, err)
+	}
+	return string(bytes), nil
 }
 
 func (rv runVerbose) JSON() string {
@@ -128,12 +149,11 @@ func Run(
 		defer cancel()
 	}
 
-	promptBytes, err := os.ReadFile(promptPath)
+	longPromptRaw, err := loadPrompt(ctx, mem, promptPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("read prompt: %w", err)
 	}
-	longPromptRaw := string(promptBytes)
-	
+
 	longPrompt, baseFunctions, err := functions.ProcessTemplateWithTracking(longPromptRaw)
 	if err != nil {
 		longPrompt = longPromptRaw
@@ -187,7 +207,7 @@ func Run(
 	for k, v := range baseFunctions {
 		b.functionsUsed[k] = v
 	}
-	
+
 	WithCachedContext(longPrompt)(b)
 	if memBlock != "" {
 		WithSystemPrompt(memBlock)(b)
@@ -214,13 +234,13 @@ func Run(
 			Result:   result,
 		})
 	}
-	
+
 	rv := runVerbose{
 		FinalText: originalOut,
 		Usage:     &resp.Usage,
 		Functions: functionsList,
 	}
-	
+
 	if len(rv.Functions) == 0 {
 		rv.Functions = nil
 	}
@@ -290,7 +310,7 @@ func Run(
 					}
 					WithSystemPrompt("O resultado da tool '" + toolName + "' foi:\n" + toolOut + "\nVocê DEVE usar essa informação para responder o usuário.")(b2)
 					b2.user = openai.ContentItem{Type: "text", Text: userMessage}
-					
+
 					for k, v := range b2.functionsUsed {
 						b.functionsUsed[k] = v
 					}
@@ -300,7 +320,7 @@ func Run(
 					if err != nil {
 						return "", nil, err
 					}
-					
+
 					functionsList = make([]FunctionCall, 0, len(b.functionsUsed))
 					for template, result := range b.functionsUsed {
 						functionsList = append(functionsList, FunctionCall{
@@ -308,7 +328,7 @@ func Run(
 							Result:   result,
 						})
 					}
-					
+
 					rv.FinalText = resp.OutputText
 					rv.Usage = &resp.Usage
 					rv.Functions = functionsList

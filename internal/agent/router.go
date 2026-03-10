@@ -47,7 +47,7 @@ type Response struct {
 	Prompt    PromptInfo     `json:"prompt"`
 	Tools     []ToolInfo     `json:"tools,omitempty"`
 	Functions []FunctionCall `json:"functions,omitempty"`
-	Usage     *openai.Usage `json:"usage,omitempty"`
+	Usage     *openai.Usage  `json:"usage,omitempty"`
 	FinalText string         `json:"final_text"`
 }
 
@@ -62,6 +62,7 @@ func RouteAndRun(
 	model string,
 	embeddingModel string,
 	sessionID string,
+	promptsDir string,
 	basePromptPath string,
 	userMessage string,
 	routerPath string,
@@ -117,12 +118,11 @@ func RouteAndRun(
 		return resp.FinalText, resp.Usage, nil
 	}
 
-	routerBytes, err := os.ReadFile(routerPath)
+	routerPromptRaw, err := loadPrompt(ctx, mem, routerPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("read router: %w", err)
 	}
-	routerPromptRaw := string(routerBytes)
-	
+
 	// Process template functions in the router prompt
 	routerPrompt, err := functions.ProcessTemplate(routerPromptRaw)
 	if err != nil {
@@ -130,13 +130,33 @@ func RouteAndRun(
 		routerPrompt = routerPromptRaw
 	}
 
-	dir := filepath.Dir(routerPath)
-	cands, err := listPromptCandidates(dir)
-	if err != nil {
-		return "", nil, err
+	var cands []string
+	var dbPrompts map[string]string
+
+	if strings.HasPrefix(promptsDir, "db:") {
+		query := strings.TrimSpace(strings.TrimPrefix(promptsDir, "db:"))
+		dbPrompts, err = mem.QueryMap(ctx, query)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to load candidates from db: %w", err)
+		}
+		if len(dbPrompts) == 0 {
+			return "", nil, fmt.Errorf("no candidates returned by query: %s", query)
+		}
+		for k := range dbPrompts {
+			cands = append(cands, k)
+		}
+		sort.Strings(cands)
+	} else {
+		if promptsDir != "" {
+			cands, err = listPromptCandidates(promptsDir)
+			if err != nil {
+				return "", nil, err
+			}
+		}
 	}
+
 	if len(cands) == 0 {
-		return "", nil, fmt.Errorf("no candidates in %s", dir)
+		return "", nil, errors.New("no prompt candidates available for routing")
 	}
 	resp.Prompt.Candidates = append(resp.Prompt.Candidates, cands...)
 
@@ -195,20 +215,35 @@ func RouteAndRun(
 		chosen = fallbackCandidate(cands, "geral.md")
 	}
 	resp.Prompt.ChosenPrompt = chosen
-	specPromptPath := filepath.Join(dir, chosen)
 
-	specBytes, err := os.ReadFile(specPromptPath)
-	if err != nil {
-		resp.Prompt.RouterError = "chosen prompt not found: " + err.Error()
-		chosen = fallbackCandidate(cands, "geral.md")
-		resp.Prompt.ChosenPrompt = chosen
-		specPromptPath = filepath.Join(dir, chosen)
-		specBytes, err = os.ReadFile(specPromptPath)
+	var specPrompt string
+
+	if len(dbPrompts) > 0 {
+		// Loaded from DB map
+		if val, exists := dbPrompts[chosen]; exists {
+			specPrompt = val
+		} else {
+			resp.Prompt.RouterError = "chosen prompt not found in db result"
+			chosen = fallbackCandidate(cands, "geral.md")
+			resp.Prompt.ChosenPrompt = chosen
+			specPrompt = dbPrompts[chosen]
+		}
+	} else {
+		// Loaded from Disk
+		pathPrefix := filepath.Join(promptsDir, chosen)
+		specPrompt, err = loadPrompt(ctx, mem, pathPrefix)
 		if err != nil {
-			return "", nil, fmt.Errorf("read chosen prompt: %w", err)
+			resp.Prompt.RouterError = "chosen prompt not found: " + err.Error()
+			chosen = fallbackCandidate(cands, "geral.md")
+			resp.Prompt.ChosenPrompt = chosen
+
+			pathPrefix = filepath.Join(promptsDir, chosen)
+			specPrompt, err = loadPrompt(ctx, mem, pathPrefix)
+			if err != nil {
+				return "", nil, fmt.Errorf("read chosen prompt: %w", err)
+			}
 		}
 	}
-	specPrompt := string(specBytes)
 
 	runOut, usage, err := Run(ctx, cli, model, embeddingModel, sessionID, basePromptPath, userMessage, true, mem, toolReg, append(opts, WithSystemPrompt(specPrompt))...)
 	if err != nil {
