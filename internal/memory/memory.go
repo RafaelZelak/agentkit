@@ -67,6 +67,30 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// QueryRow allows executing a query directly on the store's database connection.
+// This is useful for dynamic configuration loading (e.g. fetching prompts from DB).
+func (s *Store) QueryRow(ctx context.Context, query string, args ...any) *sql.Row {
+	return s.db.QueryRowContext(ctx, query, args...)
+}
+
+// QueryMap executes a query that must return two text columns (key, value) and returns them as a map.
+func (s *Store) QueryMap(ctx context.Context, query string, args ...any) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err == nil {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
 func Init(cfg Config) (*Store, error) {
 	storeOnce.Do(func() {
 		db, err := sql.Open("postgres", cfg.DSN)
