@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/RafaelZelak/agentkit/internal/agent"
 	"github.com/RafaelZelak/agentkit/internal/memory"
@@ -31,7 +32,7 @@ func NewAgent(cfg *Config) (*Agent, error) {
 			}
 			funcsPath = filepath.Join(wd, funcsPath)
 		}
-		
+
 		info, err := os.Stat(funcsPath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -44,17 +45,6 @@ func NewAgent(cfg *Config) (*Agent, error) {
 		}
 	}
 
-	var toolReg *tools.Registry
-	var err error
-	if cfg.ToolsPath != "" {
-		toolReg, err = tools.NewRegistry(cfg.ToolsPath)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		toolReg = tools.NewRegistryFromConfig(nil)
-	}
-
 	memStore, err := memory.NewStore(memory.Config{
 		DSN:          cfg.DSN,
 		Schema:       cfg.Schema,
@@ -62,6 +52,29 @@ func NewAgent(cfg *Config) (*Agent, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	var toolReg *tools.Registry
+	if cfg.ToolsPath != "" {
+		if strings.HasPrefix(cfg.ToolsPath, "db:") {
+			query := strings.TrimSpace(strings.TrimPrefix(cfg.ToolsPath, "db:"))
+			var content string
+			// we can use context.Background() here since this is initialization
+			errDB := memStore.QueryRow(context.Background(), query).Scan(&content)
+			if errDB != nil {
+				memStore.Close()
+				return nil, fmt.Errorf("failed to load tools from db query '%s': %w", query, errDB)
+			}
+			toolReg, err = tools.NewRegistryFromData([]byte(content))
+		} else {
+			toolReg, err = tools.NewRegistry(cfg.ToolsPath)
+		}
+		if err != nil {
+			memStore.Close()
+			return nil, err
+		}
+	} else {
+		toolReg = tools.NewRegistryFromConfig(nil)
 	}
 
 	return &Agent{
@@ -108,6 +121,7 @@ func (a *Agent) RouteAndRun(ctx context.Context, sessionID, basePromptPath, user
 		a.cfg.GPTModel,
 		a.cfg.EmbModel,
 		sessionID,
+		a.cfg.PromptsDir,
 		basePromptPath,
 		userMessage,
 		routerPath,
