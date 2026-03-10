@@ -21,6 +21,10 @@ func NewRegistry(path string) (*Registry, error) {
 		return nil, err
 	}
 
+	return NewRegistryFromData(data)
+}
+
+func NewRegistryFromData(data []byte) (*Registry, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err

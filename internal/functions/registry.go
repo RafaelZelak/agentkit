@@ -27,7 +27,7 @@ func RegisterGoFunction(name string, fn interface{}) error {
 
 	wrapper := func(args ...interface{}) (string, error) {
 		numIn := fnType.NumIn()
-		
+
 		if numIn == 0 {
 			result := fnValue.Call(nil)
 			if len(result) == 1 {
@@ -44,7 +44,7 @@ func RegisterGoFunction(name string, fn interface{}) error {
 		callArgs := make([]reflect.Value, numIn)
 		for i := 0; i < numIn; i++ {
 			paramType := fnType.In(i)
-			
+
 			if i < len(args) {
 				argValue := reflect.ValueOf(args[i])
 				if argValue.Type().AssignableTo(paramType) {
