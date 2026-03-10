@@ -115,6 +115,35 @@ func main() {
 }
 ```
 
+### 4. Carregamento Dinâmico por Banco de Dados (SaaS)
+
+AgentKit agora suporta totalmente ambientes SaaS que desejam carregar agentes e suas respectivas configurações dinamicamente via um banco de dados, no lugar de usar somente os arquivos do disco:
+
+Você pode alimentar informações dinâmicas via `jsonConfig` buscando do BD, e as chaves `prompts_dir`, `base_prompt`, `router_prompt` e `tools_path` aceitam um prefixo especial `db:` no qual é aguardada uma query SQL válida usando o próprio mecanismo transacional já configurado no Agente na key `dsn`:
+
+```go
+jsonConfig := []byte(`
+agents:
+  - name: suporte_db
+    description: "SaaS Database Agent"
+    api_key: ${OPENAI_API_KEY}
+    gpt_model: gpt-4o
+    dsn: ${PGSQL_DSN}
+    schema: suporte_memory
+    prompts_dir: prompts/suporte/
+    # O Agent conectará no banco configurado usando seu Pool e rodará essas queries, atribuindo as vars dinamicamente
+    base_prompt: "db:SELECT base_prompt FROM saas_prompts_table LIMIT 1"
+    router_prompt: ""
+    tools_path: "db:SELECT tools_yml_config FROM saas_tools_table LIMIT 1"
+    verbose: true
+`)
+
+manager, err := agentkit.LoadAgentsFromJSON(manager, jsonConfig)
+if err != nil {
+	log.Fatal("Falha ao carregar agentes dinamicamente:", err)
+}
+```
+
 ---
 
 ## Ferramentas (Tools)
