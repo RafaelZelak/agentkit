@@ -49,6 +49,7 @@ func NewAgent(cfg *Config) (*Agent, error) {
 		DSN:          cfg.DSN,
 		Schema:       cfg.Schema,
 		EmbeddingDim: cfg.EmbeddingDim,
+		AgentName:    cfg.Name,
 	})
 	if err != nil {
 		return nil, err

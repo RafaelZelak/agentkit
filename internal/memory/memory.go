@@ -4,24 +4,29 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
-	_ "github.com/lib/pq"
+	pq "github.com/lib/pq"
 )
 
 type Config struct {
 	DSN          string
 	Schema       string
 	EmbeddingDim int
+	AgentName    string
 }
 
 type Store struct {
-	db           *sql.DB
-	schema       string
-	embeddingDim int
+	db            *sql.DB
+	schema        string
+	embeddingDim  int
+	agentName     string
+	skipAgentName atomic.Bool
 }
 
 type HistoryItem struct {
@@ -44,6 +49,7 @@ func NewStore(cfg Config) (*Store, error) {
 		db:           db,
 		schema:       cfg.Schema,
 		embeddingDim: cfg.EmbeddingDim,
+		agentName:    cfg.AgentName,
 	}
 	if err := s.migrate(); err != nil {
 		db.Close()
@@ -57,6 +63,7 @@ func NewStoreWithDB(db *sql.DB, cfg Config) *Store {
 		db:           db,
 		schema:       cfg.Schema,
 		embeddingDim: cfg.EmbeddingDim,
+		agentName:    cfg.AgentName,
 	}
 }
 
@@ -102,6 +109,7 @@ func Init(cfg Config) (*Store, error) {
 			db:           db,
 			schema:       cfg.Schema,
 			embeddingDim: cfg.EmbeddingDim,
+			agentName:    cfg.AgentName,
 		}
 		if err := s.migrate(); err != nil {
 			storeErr = err
@@ -154,22 +162,59 @@ func (s *Store) migrate() error {
 }
 
 func (s *Store) SaveEmbeddedMessage(ctx context.Context, sessionID, role, text string, embedding []float32) (int64, error) {
-	var id int64
-	if len(embedding) == 0 {
-		err := s.db.QueryRowContext(ctx,
-			fmt.Sprintf(`INSERT INTO %s.chat_memory (session_id, role, text, embedding)
-			 VALUES ($1,$2,$3,NULL) RETURNING id`, pqIdent(s.schema)),
-			sessionID, role, text,
-		).Scan(&id)
-		return id, err
+	if s.agentName != "" && !s.skipAgentName.Load() {
+		id, err := s.saveEmbeddedMessage(ctx, sessionID, role, text, embedding, true)
+		if err == nil {
+			return id, nil
+		}
+		if !isMissingAgentNameColumnError(err) {
+			return 0, err
+		}
+		s.skipAgentName.Store(true)
 	}
-	vec := encodeVector(embedding)
-	err := s.db.QueryRowContext(ctx,
-		fmt.Sprintf(`INSERT INTO %s.chat_memory (session_id, role, text, embedding)
-		 VALUES ($1,$2,$3,$4::vector) RETURNING id`, pqIdent(s.schema)),
-		sessionID, role, text, vec,
-	).Scan(&id)
+
+	return s.saveEmbeddedMessage(ctx, sessionID, role, text, embedding, false)
+}
+
+func (s *Store) saveEmbeddedMessage(ctx context.Context, sessionID, role, text string, embedding []float32, includeAgentName bool) (int64, error) {
+	var (
+		id    int64
+		query string
+		args  []any
+	)
+
+	if len(embedding) == 0 {
+		if includeAgentName {
+			query = fmt.Sprintf(`INSERT INTO %s.chat_memory (session_id, role, text, agent_name, embedding) VALUES ($1,$2,$3,$4,NULL) RETURNING id`, pqIdent(s.schema))
+			args = []any{sessionID, role, text, s.agentName}
+		} else {
+			query = fmt.Sprintf(`INSERT INTO %s.chat_memory (session_id, role, text, embedding) VALUES ($1,$2,$3,NULL) RETURNING id`, pqIdent(s.schema))
+			args = []any{sessionID, role, text}
+		}
+	} else {
+		vec := encodeVector(embedding)
+		if includeAgentName {
+			query = fmt.Sprintf(`INSERT INTO %s.chat_memory (session_id, role, text, agent_name, embedding) VALUES ($1,$2,$3,$4,$5::vector) RETURNING id`, pqIdent(s.schema))
+			args = []any{sessionID, role, text, s.agentName, vec}
+		} else {
+			query = fmt.Sprintf(`INSERT INTO %s.chat_memory (session_id, role, text, embedding) VALUES ($1,$2,$3,$4::vector) RETURNING id`, pqIdent(s.schema))
+			args = []any{sessionID, role, text, vec}
+		}
+	}
+
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&id)
 	return id, err
+}
+
+func isMissingAgentNameColumnError(err error) bool {
+	var pqErr *pq.Error
+	if !errors.As(err, &pqErr) {
+		return false
+	}
+	if pqErr.Code != "42703" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "agent_name")
 }
 
 func (s *Store) SaveMetadata(ctx context.Context, messageID int64, key string, value any) error {
